@@ -130,13 +130,16 @@
       <nav id="tabs" class="tabs" role="tablist" aria-label="Sections">
         <button type="button" role="tab" data-tab="stands" aria-selected="true"></button>
         <button type="button" role="tab" data-tab="marks" aria-selected="false"></button>
+        <button type="button" role="tab" data-tab="photos" aria-selected="false"></button>
         <button type="button" role="tab" data-tab="guide" aria-selected="false"></button>
       </nav>
     </section>
 
     <div id="landcard" class="landcard" role="dialog" aria-label="Public land details" hidden></div>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div id="viewer" class="viewer" role="dialog" aria-label="Photo" hidden></div>
     <input id="file-photo" type="file" accept="image/*" hidden>
+    <input id="file-camera" type="file" accept="image/*" capture="environment" hidden>
     <input id="file-import" type="file" accept="application/json,.json" hidden>
   </main>
 

@@ -41,6 +41,7 @@
     guide: 'M12 3 a9 9 0 1 0 0.01 0 M12 11 v6 M12 7 v.5',
     trash: 'M5 7 h14 M9 7 V4 h6 v3 M7 7 l1 13 h8 l1-13',
     photo: 'M4 8 H8 L10 6 H14 L16 8 H20 V19 H4 Z M12 10.5 a3 3 0 1 0 0.01 0',
+    photos: 'M3 7 H17 V19 H3 Z M7 7 V4 H21 V16 H17 M5.5 16.5 l3.5-4 3 3 1.5-1.5 2 2.5',
     refresh: 'M20 11 a8 8 0 1 0 -2.3 5.7 M20 4 v7 h-7',
     ruler: 'M3 17 L17 3 L21 7 L7 21 Z M7 13 l2 2 M10 10 l2 2 M13 7 l2 2',
     undo: 'M9 7 L4 12 L9 17 M4 12 H15 a5 5 0 0 1 0 10 H12'
@@ -382,10 +383,12 @@
     const keep = key === lastKey ? body.scrollTop : 0; lastKey = key;
     let node;
     if (ui.view === 'add') node = addView();
+    else if (ui.view === 'photo') node = photoAddView();
     else if (ui.view === 'placing') node = placingView();
     else if (ui.view === 'stand') node = standView();
     else if (ui.view === 'mark') node = markView();
     else if (ui.tab === 'marks') node = marksView();
+    else if (ui.tab === 'photos') node = photosView();
     else if (ui.tab === 'guide') node = guideView();
     else node = listView();
     body.replaceChildren(node);
@@ -703,11 +706,11 @@
       root.appendChild(h('div', { class: 'empty small' }, h('p', null, 'Drop a pin where you find sign, add a note and a photo, and it stays on your map. Photos with location data place their own pin.'),
         h('div', { class: 'stack' },
           h('button', { class: 'btn primary', type: 'button', onclick: () => go('add') }, icon('plus', 16), 'Add a mark'),
-          h('button', { class: 'btn', type: 'button', onclick: () => pickPhoto(placeFromPhoto) }, icon('photo', 16), 'Add a photo'))));
+          h('button', { class: 'btn', type: 'button', onclick: () => go('photo') }, icon('photo', 16), 'Add a photo'))));
       return root;
     }
     const note = backupNote(); if (note) root.appendChild(note);
-    root.appendChild(h('button', { class: 'btn wide-btn', type: 'button', onclick: () => pickPhoto(placeFromPhoto) }, icon('photo', 16), 'Add a photo'));
+    root.appendChild(h('button', { class: 'btn wide-btn', type: 'button', onclick: () => go('photo') }, icon('photo', 16), 'Add a photo'));
     const counts = {}; all.forEach((m) => { counts[m.type] = (counts[m.type] || 0) + 1; });
     root.appendChild(h('div', { class: 'chips' },
       [['all', 'All ' + all.length]].concat(MT.ORDER.filter((k) => counts[k]).map((k) => [k, MT.TYPES[k].label + ' ' + counts[k]]))
@@ -730,8 +733,8 @@
       h('button', { class: 'tile', type: 'button', onclick: () => startPlacing('stand') }, h('span', { class: 'type-dot stand-dot' }, icon('stands', 18)), 'Stand'),
       MT.ORDER.map((k) => h('button', { class: 'tile', type: 'button', onclick: () => startPlacing(k) },
         h('span', { class: 'type-dot', style: 'background:' + MT.TYPES[k].color }, MT.icon(k, 18)), MT.TYPES[k].label))));
-    root.appendChild(h('button', { class: 'btn wide-btn', type: 'button', onclick: () => pickPhoto(placeFromPhoto) }, icon('photo', 16), 'Add from a photo'));
-    root.appendChild(h('p', { class: 'fine' }, 'A photo taken with location turned on drops its own pin where you took it. Otherwise you choose the spot.'));
+    root.appendChild(h('button', { class: 'btn wide-btn', type: 'button', onclick: () => go('photo') }, icon('photo', 16), 'Add a photo'));
+    root.appendChild(h('p', { class: 'fine' }, 'Take a photo at the sign and the pin drops where you are standing.'));
     return root;
   }
   function placingView() {
@@ -790,7 +793,8 @@
     ui.placing = { kind: kind, file: file || null }; ui.view = 'placing'; ui.selStand = null; ui.selMark = null;
     if (isMobile()) setSheet('peek');
     M.setPlacing(true);
-    $('banner-text').textContent = 'Tap the map to place your ' + (kind === 'stand' ? 'stand' : (MT.TYPES[kind] || MT.TYPES.other).label.toLowerCase()) + '.';
+    $('banner-text').textContent = file ? 'Tap the map where you took the photo.'
+      : 'Tap the map to place your ' + (kind === 'stand' ? 'stand' : (MT.TYPES[kind] || MT.TYPES.other).label.toLowerCase()) + '.';
     $('banner').hidden = false;
     renderAll();
   }
@@ -820,7 +824,8 @@
 
   /* ---- photos ---- */
   let photoCb = null;
-  function pickPhoto(cb) { photoCb = cb; const f = $('file-photo'); f.value = ''; f.click(); }
+  // camera = true opens the phone's camera directly; otherwise the phone offers its photo library
+  function pickPhoto(cb, camera) { photoCb = cb; const f = $(camera ? 'file-camera' : 'file-photo'); f.value = ''; f.click(); }
   function resizeToBlob(file, max, q) {
     function draw(src, w, hgt) {
       const sc = Math.min(1, max / Math.max(w, hgt)), cv = document.createElement('canvas');
@@ -844,19 +849,102 @@
       renderAll();
     }).catch((e) => toast(e.message || 'Could not add that photo.'));
   }
+  function photoGps(file) {
+    return (file.arrayBuffer ? file.arrayBuffer() : Promise.resolve(null)).catch(() => null).then((buf) => (buf ? SC.exif.readGps(buf) : null));
+  }
+  function dropPhotoPin(file, lat, lng, msg) {
+    ui.placing = { kind: 'other', file: file };
+    placeAt(lat, lng);
+    M.flyTo(lat, lng, 17, isMobile() ? $('sheet').offsetHeight : 0);
+    toast(msg);
+  }
+  function placePhotoByHand(file, msg) { toast(msg); startPlacing('other', file); }
+  // A photo from the library: use the location saved in it, if it has one.
   function placeFromPhoto(file) {
-    (file.arrayBuffer ? file.arrayBuffer() : Promise.resolve(null)).catch(() => null).then((buf) => {
-      const gps = buf ? SC.exif.readGps(buf) : null;
-      if (gps) {
-        ui.placing = { kind: 'other', file: file };
-        placeAt(gps.lat, gps.lng);
-        M.flyTo(gps.lat, gps.lng, 17, isMobile() ? $('sheet').offsetHeight : 0);
-        toast('Placed from the photo’s location. Pick the kind of sign.');
-      } else {
-        // phones often leave the location out of a photo taken straight from the browser
-        toast('That photo has no location. Tap the map where you took it, or tap Use my location.');
-        startPlacing('other', file);
-      }
+    photoGps(file).then((gps) => {
+      if (gps) dropPhotoPin(file, gps.lat, gps.lng, 'Placed from the photo’s location. Pick the kind of sign.');
+      else placePhotoByHand(file, 'That photo has no location saved in it. Tap the map where you took it.');
+    });
+  }
+  // A photo taken just now: phones leave the location out of these, so use where the phone is standing.
+  function placeFromCamera(file) {
+    photoGps(file).then((gps) => {
+      if (gps) return dropPhotoPin(file, gps.lat, gps.lng, 'Placed where you took the photo. Pick the kind of sign.');
+      wantLocation = true;
+      toast('Finding where you are standing…');
+      M.locate().then((p) => dropPhotoPin(file, p.lat, p.lng, 'Placed where you are standing' + (p.accuracy > 30 ? ' (within about ' + Math.round(E.yards(p.accuracy)) + ' yd)' : '') + '. Drag the pin if it is off, then pick the kind of sign.'))
+        .catch(() => placePhotoByHand(file, 'Could not get your location. Tap the map where you took the photo.'));
+    });
+  }
+  /* ---- add a photo: take one here, or pick one already on the phone ---- */
+  function photoAddView() {
+    const root = h('div', { class: 'view' });
+    root.appendChild(backHeader('Add a photo', () => go('list')));
+    root.appendChild(h('div', { class: 'stack' },
+      h('button', { class: 'btn primary big-btn', type: 'button', onclick: () => pickPhoto(placeFromCamera, true) }, icon('photo', 20), 'Take a photo here'),
+      h('p', { class: 'fine' }, 'Opens your camera. The pin drops where you are standing, so take it at the sign.'),
+      h('button', { class: 'btn big-btn', type: 'button', onclick: () => pickPhoto(placeFromPhoto) }, icon('photos', 20), 'Choose from my photos'),
+      h('p', { class: 'fine' }, 'For photos you took earlier. If the photo has its location saved, the pin drops there. If not, you tap the spot on the map.')));
+    return root;
+  }
+  /* ---- photo library: every photo on the map in one place ---- */
+  function photoMarks() { return S.state.marks.filter((m) => m.photoId).slice().reverse(); }
+  function photosView() {
+    const root = h('div', { class: 'view' }), list = photoMarks();
+    root.appendChild(h('div', { class: 'view-head' }, h('h2', null, 'Photos'), h('p', { class: 'sub' }, list.length ? list.length + (list.length === 1 ? ' photo' : ' photos') + ' on the map' : 'Your sign photos, all in one place')));
+    root.appendChild(h('button', { class: 'btn wide-btn', type: 'button', onclick: () => go('photo') }, icon('photo', 16), 'Add a photo'));
+    if (!list.length) {
+      root.appendChild(h('div', { class: 'empty small' }, h('p', null, 'No photos yet. Take one at a scrape, rub or trail and it shows up here and as a pin on the map.')));
+      return root;
+    }
+    root.appendChild(h('div', { class: 'gallery' }, list.map((m, i) => {
+      const t = MT.TYPES[m.type] || MT.TYPES.other;
+      const b = h('button', { class: 'gal-item', type: 'button', 'aria-label': t.label + ' photo', onclick: () => openViewer(i) },
+        h('span', { class: 'gal-tag', style: 'background:' + t.color }, MT.icon(m.type, 12)));
+      S.photoUrl(m.photoId).then((u) => { if (u) b.style.backgroundImage = 'url("' + u + '")'; });
+      return b;
+    })));
+    return root;
+  }
+  let viewerAt = -1;
+  function closeViewer() { viewerAt = -1; $('viewer').hidden = true; $('viewer').replaceChildren(); }
+  function openViewer(i) {
+    const list = photoMarks(), box = $('viewer');
+    if (!list.length) return closeViewer();
+    viewerAt = i = (i + list.length) % list.length;
+    const m = list[i], t = MT.TYPES[m.type] || MT.TYPES.other;
+    const img = h('img', { class: 'viewer-img', alt: t.label + ' photo' });
+    S.photoUrl(m.photoId).then((u) => { if (u && viewerAt === i) img.src = u; });
+    const many = list.length > 1;
+    box.replaceChildren(
+      h('div', { class: 'viewer-top' },
+        h('span', null, many ? (i + 1) + ' of ' + list.length : ''),
+        h('button', { class: 'viewer-btn', type: 'button', 'aria-label': 'Close', onclick: closeViewer }, icon('close', 22))),
+      h('div', { class: 'viewer-stage' },
+        many ? h('button', { class: 'viewer-btn viewer-prev', type: 'button', 'aria-label': 'Previous photo', onclick: () => openViewer(i - 1) }, icon('back', 22)) : null,
+        img,
+        many ? h('button', { class: 'viewer-btn viewer-next', type: 'button', 'aria-label': 'Next photo', onclick: () => openViewer(i + 1) }, icon('back', 22)) : null),
+      h('div', { class: 'viewer-foot' },
+        h('div', { class: 'viewer-cap' },
+          h('b', null, t.label + '  ·  ' + new Date(m.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })),
+          m.note ? h('span', null, m.note) : null),
+        h('button', { class: 'btn small', type: 'button', onclick: () => { closeViewer(); selectMark(m.id); } }, icon('locate', 15), 'Show on map')));
+    box.hidden = false;
+  }
+  function wireViewer() {
+    let x0 = null;
+    const box = $('viewer');
+    box.addEventListener('touchstart', (e) => { x0 = e.touches.length === 1 ? e.touches[0].clientX : null; }, { passive: true });
+    box.addEventListener('touchend', (e) => {
+      if (x0 == null || viewerAt < 0) return;
+      const dx = e.changedTouches[0].clientX - x0; x0 = null;
+      if (Math.abs(dx) > 60 && photoMarks().length > 1) openViewer(viewerAt + (dx < 0 ? 1 : -1));
+    });
+    document.addEventListener('keydown', (e) => {
+      if (viewerAt < 0) return;
+      if (e.key === 'Escape') closeViewer();
+      else if (e.key === 'ArrowRight') openViewer(viewerAt + 1);
+      else if (e.key === 'ArrowLeft') openViewer(viewerAt - 1);
     });
   }
 
@@ -998,7 +1086,7 @@
     pop.querySelectorAll('[data-layer]').forEach((c) => c.addEventListener('change', () => { settings().layers[c.dataset.layer] = c.checked; S.save(); if (c.dataset.layer === 'animate' && SC.flow) SC.flow.setEnabled(c.checked);
       if (c.dataset.layer === 'publand' && SC.publand) { SC.publand.setEnabled(c.checked); if (c.checked && M.zoom < 11) toast('Zoom in to see public land boundaries.'); }
       if (c.dataset.layer === 'field' || c.dataset.layer === 'swirl' || c.dataset.layer === 'animate') loadField(); renderMap(); }));
-    $('file-photo').addEventListener('change', (e) => { const f = e.target.files && e.target.files[0]; if (f && photoCb) photoCb(f); });
+    ['file-photo', 'file-camera'].forEach((id) => $(id).addEventListener('change', (e) => { const f = e.target.files && e.target.files[0]; if (f && photoCb) photoCb(f); }));
     $('file-import').addEventListener('change', (e) => {
       const f = e.target.files && e.target.files[0]; if (!f) return;
       f.text().then(S.importAll).then((r) => { toast('Restored ' + r.stands + ' stands and ' + r.marks + ' marks'); refresh(); renderAll(); }).catch((err) => toast(err.message));
@@ -1052,7 +1140,7 @@
     $('btn-layers').appendChild(icon('layers', 22));
     $('btn-locate').appendChild(icon('locate', 22));
     $('fab').appendChild(icon('plus', 28));
-    const tabs = { stands: ['stands', 'Stands'], marks: ['marks', 'Marks'], guide: ['guide', 'Guide'] };
+    const tabs = { stands: ['stands', 'Stands'], marks: ['marks', 'Marks'], photos: ['photos', 'Photos'], guide: ['guide', 'Guide'] };
     document.querySelectorAll('#tabs button').forEach((b) => {
       const t = tabs[b.dataset.tab];
       b.appendChild(icon(t[0], 22)); b.appendChild(h('span', null, t[1]));
@@ -1213,7 +1301,8 @@
     $('btn-measure').appendChild(icon('ruler', 22));
     $('btn-measure').addEventListener('click', () => { if (ui.measure) endMeasure(); else startMeasure(); });
     $('btn-photo').insertBefore(icon('photo', 22), $('btn-photo').firstChild);
-    $('btn-photo').addEventListener('click', () => { if (ui.measure) endMeasure(); if (ui.placing) endPlacing(); pickPhoto(placeFromPhoto); });
+    $('btn-photo').addEventListener('click', () => { if (ui.measure) endMeasure(); endPlacing(); if (isMobile() && ui.sheet === 'peek') setSheet('half'); go('photo'); });
+    wireViewer();
     $('measurebar').addEventListener('click', (e) => {
       const b = e.target.closest('[data-m]'); if (!b || !ui.measure) return;
       const k = b.dataset.m;

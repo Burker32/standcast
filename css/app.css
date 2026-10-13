@@ -453,6 +453,26 @@ textarea { resize: vertical; min-height: 96px; line-height: 1.4; }
   background: var(--surface); color: var(--fg); border: 1px solid var(--line); font: 700 15px/1 var(--body);
 }
 @media (min-width: 960px) { .fab-photo { right: 92px; } }
+.big-btn { min-height: 56px; font-size: 17px; }
+
+/* photo library: a grid of every photo on the map, and a full-screen viewer */
+.gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+@media (min-width: 520px) and (max-width: 959px) { .gallery { grid-template-columns: repeat(4, 1fr); } }
+.gal-item { position: relative; aspect-ratio: 1; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2) center / cover no-repeat; padding: 0; }
+.gal-tag { position: absolute; left: 5px; bottom: 5px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; color: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .5); }
+.viewer { position: fixed; inset: 0; z-index: 2000; display: flex; flex-direction: column; background: rgba(8, 10, 9, .96); color: #fff; }
+.viewer-top { flex: none; display: flex; align-items: center; justify-content: space-between; padding: calc(env(safe-area-inset-top, 0px) + 8px) 10px 8px 16px; font-size: 14px; }
+.viewer-stage { flex: 1; min-height: 0; position: relative; display: flex; align-items: center; justify-content: center; }
+.viewer-img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.viewer-btn { width: 44px; height: 44px; border-radius: 50%; border: 0; display: grid; place-items: center; background: rgba(255, 255, 255, .16); color: #fff; }
+.viewer-prev, .viewer-next { position: absolute; top: 50%; transform: translateY(-50%); z-index: 1; background: rgba(0, 0, 0, .5); }
+.viewer-prev { left: 8px; }
+.viewer-next { right: 8px; }
+.viewer-next svg { transform: rotate(180deg); }
+.viewer-foot { flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 16px calc(env(safe-area-inset-bottom, 0px) + 14px); }
+.viewer-cap { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: 14px; }
+.viewer-cap span { color: rgba(255, 255, 255, .78); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.viewer-foot .btn { flex: none; color: var(--fg); }
 .measurebar {
   position: absolute; z-index: 820; left: 12px; right: 68px; top: calc(env(safe-area-inset-top, 0px) + 64px);
   display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 14px;
