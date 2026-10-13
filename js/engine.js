@@ -365,17 +365,19 @@
    * flats and creek bottoms. Connected cells become one bench; scraps too small to matter are dropped.
    * An estimate from the shape of the ground only. Thresholds are in BENCH and can be passed in to tune. */
   // Set for rolling Ozark-border hills (most slopes around Stockton Lake are under 15 degrees), not mountains.
+  // Checked against two known spots in Brush Creek Conservation Area: the bed of S 7th Rd (a 20 ft wide flat cut
+  // into the hill) and a subtle bench at 37.8096, -93.6250 that only eases to about 7 degrees between 10 and 12.
   var BENCH = {
-    flatMax: 6,      // degrees: a bench is no steeper than this
+    flatMax: 8,      // degrees: a bench is no steeper than this
     steepMin: 8,     // degrees: the ground above and below must reach at least this
-    contrast: 4,     // degrees: ...and be at least this much steeper than the bench
-    ratio: 0.5,      // the bench is at most this share of the steeper ground's slope
+    contrast: 2.5,   // degrees: ...and be at least this much steeper than the bench
+    ratio: 0.72,     // the bench is at most this share of the steeper ground's slope
     hillMin: 4,      // degrees: the broad hillside the bench sits on must slope at least this
     probeM: 45,      // meters: how far up and down the hill to look
     reliefM: 2,      // meters: least climb above and drop below within that distance
-    smoothM: 2,      // meters: smoothing radius that takes out lidar chatter (never less than one cell)
+    smoothM: 4,      // meters: smoothing radius that takes out lidar chatter (never less than one cell)
     broadM: 30,      // meters: smoothing radius that defines "the hillside"
-    grow: 1.35,      // how much easier the test is for cells touching a certain bench cell (1 = no growing)
+    grow: 1.2,    // how much easier the test is for cells touching a certain bench cell (1 = no growing)
     minAreaM2: 250,  // drop patches smaller than this
     minLenM: 25      // ...or shorter than this from end to end
   };

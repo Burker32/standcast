@@ -392,7 +392,7 @@ test('bench elevation tiles: fixed squares that cover the view', () => {
     let h = 400;
     for (let i = 0; i < R; i++) {
       const onBench = i >= 45 && i <= 51, tilted = j >= 42 && j <= 58;
-      if (i) h -= d * Math.tan((onBench ? (tilted ? 7 : 2) : 20) * Math.PI / 180);
+      if (i) h -= d * Math.tan((onBench ? (tilted ? 9 : 2) : 20) * Math.PI / 180);
       z[i * C + j] = h;
     }
   }

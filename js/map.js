@@ -272,7 +272,7 @@
       // cells on the rim are drawn dark, so each bench gets an outline that shows on any photo
       var edge = i === 0 || j === 0 || i === R - 1 || j === C - 1 || !m[k - 1] || !m[k + 1] || !m[k - C] || !m[k + C];
       var o = k * 4;
-      if (edge) { d[o] = 12; d[o + 1] = 40; d[o + 2] = 44; d[o + 3] = 235; }
+      if (edge) { d[o] = 24; d[o + 1] = 40; d[o + 2] = 10; d[o + 3] = 235; }
       else { d[o] = cr; d[o + 1] = cg; d[o + 2] = cb; d[o + 3] = 150; }
     }
     ctx.putImageData(img, 0, 0);
