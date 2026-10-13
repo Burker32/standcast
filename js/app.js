@@ -690,6 +690,17 @@
     return root;
   }
 
+  // The spot's coordinates with a button to copy them, for sharing a location or looking it up elsewhere.
+  function coordsRow(lat, lng) {
+    const text = lat.toFixed(5) + ', ' + lng.toFixed(5);
+    const copy = () => {
+      const done = () => toast('Location copied: ' + text);
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, () => toast(text));
+      else toast(text);
+    };
+    return h('div', { class: 'coords' }, h('span', null, text), h('button', { class: 'btn small', type: 'button', onclick: copy }, 'Copy location'));
+  }
+
   /* ---- marks ---- */
   function photoBlock(m) {
     const wrap = h('div', { class: 'photo-block' });
@@ -712,6 +723,11 @@
     const root = h('div', { class: 'view' });
     root.appendChild(backHeader(t.label, () => { go('list'); }));
     if (ui.draft) root.appendChild(draftBar());
+    root.appendChild(h('div', { class: 'stand-head' },
+      h('input', {
+        class: 'name-input', id: 'mark-name', type: 'text', value: m.name || '', maxlength: 40, placeholder: 'Name it (optional)', 'aria-label': 'Name of this mark',
+        oninput: (e) => { S.updateMark(m.id, { name: e.target.value.trim() ? e.target.value : '' }); renderMap(); }
+      })));
     root.appendChild(h('div', { class: 'type-grid', role: 'radiogroup', 'aria-label': 'Kind of sign' }, MT.ORDER.map((k) => {
       const b = h('button', { class: 'type-btn' + (k === m.type ? ' on' : ''), type: 'button', role: 'radio', 'aria-checked': k === m.type ? 'true' : 'false', onclick: () => { S.updateMark(m.id, { type: k }); renderAll(); } },
         h('span', { class: 'type-dot', style: 'background:' + MT.TYPES[k].color }, MT.icon(k, 16)), MT.TYPES[k].label);
@@ -721,6 +737,7 @@
       h('textarea', { id: 'mark-note', rows: 4, maxlength: 1500, placeholder: 'Fresh or old, size, direction it faces, what you noticed.', oninput: (e) => S.updateMark(m.id, { note: e.target.value }) }, m.note || '')));
     root.appendChild(photoBlock(m));
     root.appendChild(h('p', { class: 'fine' }, 'Added ' + new Date(m.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) + '. Drag the pin on the map to move it.'));
+    root.appendChild(coordsRow(m.lat, m.lng));
     root.appendChild(h('div', { class: 'block actions' },
       h('button', { class: 'btn', type: 'button', onclick: () => M.flyTo(m.lat, m.lng, 18, isMobile() ? $('sheet').offsetHeight : 0) }, icon('locate', 16), 'Show on map'),
       confirmTwice('Delete mark', () => { S.removeMark(m.id); toast('Mark deleted'); go('list', { tab: 'marks' }); })));
@@ -748,7 +765,7 @@
       if (m.photoId) S.photoUrl(m.photoId).then((u) => { if (u) { thumb.style.backgroundImage = 'url("' + u + '")'; thumb.classList.add('has'); } });
       root.appendChild(h('button', { class: 'row-card', type: 'button', onclick: () => selectMark(m.id) },
         h('span', { class: 'type-dot', style: 'background:' + t.color }, MT.icon(m.type, 16)),
-        h('span', { class: 'row-main' }, h('b', null, t.label), h('span', { class: 'row-note' }, m.note ? m.note : 'No note')), thumb));
+        h('span', { class: 'row-main' }, h('b', null, m.name || t.label), h('span', { class: 'row-note' }, (m.name ? t.label + (m.note ? '  ·  ' : '') : '') + (m.note ? m.note : (m.name ? '' : 'No note')))), thumb));
     });
     return root;
   }
@@ -801,7 +818,7 @@
   // true once you have put work into it, so a stray tap on the map cannot throw that away
   function draftTouched() {
     const d = ui.draft, it = draftItem(); if (!it) return false;
-    return d.kind === 'stand' ? !!(it.notes || E.isConfigured(it.winds) || (it.sits || []).length) : !!(it.note || it.photoId);
+    return d.kind === 'stand' ? !!(it.notes || E.isConfigured(it.winds) || (it.sits || []).length) : !!(it.name || it.note || it.photoId);
   }
   function saveDraft() {
     const d = ui.draft; if (!d) return;
@@ -1039,7 +1056,7 @@
         many ? h('button', { class: 'viewer-btn viewer-next', type: 'button', 'aria-label': 'Next photo', onclick: () => openViewer(i + 1) }, icon('back', 22)) : null),
       h('div', { class: 'viewer-foot' },
         h('div', { class: 'viewer-cap' },
-          h('b', null, t.label + '  ·  ' + new Date(m.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })),
+          h('b', null, (m.name ? m.name + '  ·  ' : '') + t.label + '  ·  ' + new Date(m.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })),
           m.note ? h('span', null, m.note) : null),
         h('button', { class: 'btn small', type: 'button', onclick: () => { closeViewer(); selectMark(m.id); } }, icon('locate', 15), 'Show on map')));
     box.hidden = false;

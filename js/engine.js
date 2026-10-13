@@ -374,6 +374,7 @@
     probeM: 45,      // meters: how far up and down the hill to look
     reliefM: 2,      // meters: least climb above and drop below within that distance
     broadM: 30,      // meters: smoothing radius that defines "the hillside"
+    grow: 1.35,      // how much easier the test is for cells touching a certain bench cell (1 = no growing)
     minAreaM2: 250,  // drop patches smaller than this
     minLenM: 25      // ...or shorter than this from end to end
   };
@@ -424,26 +425,30 @@
       }
       return { max: mx, dz: zs[r * cols + c] - zs[i0 * cols + j0] };
     }
+    // Two passes of the same test. Cells that pass the strict one are certain bench; cells that pass only the
+    // easier one count when they touch a certain cell. That lets a bench that wraps around a hill show as one
+    // strip even where it narrows or tilts a little, without the easier test adding benches of its own.
+    var easy = { flatMax: o.flatMax * o.grow, steepMin: o.steepMin / o.grow, contrast: o.contrast / (o.grow * o.grow), ratio: Math.min(0.75, o.ratio * o.grow), reliefM: o.reliefM / o.grow };
     for (i = kb; i < rows - kb; i++) for (j = kb; j < cols - kb; j++) {
       idx = i * cols + j;
       var s0 = slope[idx];
-      if (!(s0 <= o.flatMax)) continue;
+      if (!(s0 <= easy.flatMax)) continue;
       var bx = (zb[idx + kb] - zb[idx - kb]) / (2 * kb * cellM), by = (zb[idx - kb * cols] - zb[idx + kb * cols]) / (2 * kb * cellM);
       var gm = Math.hypot(bx, by);
       if (!(gm >= hillMin)) continue;                         // not on a hillside (or no data)
       var ux = bx / gm, uy = by / gm;                         // unit vector pointing uphill (east, north)
-      var need = Math.max(o.steepMin, s0 + o.contrast);
       var up = probe(i, j, -uy, ux);
-      if (!up || up.max < need || up.dz < o.reliefM) continue;
+      if (!up) continue;
       var dn = probe(i, j, uy, -ux);
-      if (!dn || dn.max < need || -dn.dz < o.reliefM) continue;
-      if (s0 > o.ratio * Math.min(up.max, dn.max)) continue;
-      cand[idx] = 1;
+      if (!dn) continue;
+      var steep = Math.min(up.max, dn.max), relief = Math.min(up.dz, -dn.dz);
+      if (s0 <= o.flatMax && steep >= Math.max(o.steepMin, s0 + o.contrast) && relief >= o.reliefM && s0 <= o.ratio * steep) cand[idx] = 2;
+      else if (steep >= Math.max(easy.steepMin, s0 + easy.contrast) && relief >= easy.reliefM && s0 <= easy.ratio * steep) cand[idx] = 1;
     }
     // join touching cells into benches and drop the scraps
     var mask = new Uint8Array(n), seen = new Uint8Array(n), stack = new Int32Array(n), benches = [];
     for (var start = 0; start < n; start++) {
-      if (!cand[start] || seen[start]) continue;
+      if (cand[start] !== 2 || seen[start]) continue;         // every bench starts from a certain cell
       var top = 0, members = [], r0 = rows, r1 = -1, c0 = cols, c1 = -1, zsum = 0;
       stack[top++] = start; seen[start] = 1;
       while (top) {

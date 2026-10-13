@@ -357,6 +357,9 @@ textarea { resize: vertical; min-height: 96px; line-height: 1.4; }
 .st-label i { font-style: normal; font-weight: 400; opacity: .88; font-variant-numeric: tabular-nums; }
 .zoom-low .st-label { display: none; }
 .mk { position: relative; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; color: #fff; border: 2.5px solid #fff; box-shadow: 0 2px 7px rgba(0, 0, 0, .55); }
+.mk-label { position: absolute; left: 32px; top: 3px; white-space: nowrap; pointer-events: none; padding: 2px 7px; border-radius: 8px; background: rgba(10, 14, 11, .8); color: #fff; font: 700 12px/1.25 var(--body); }
+.zoom-low .mk-label { display: none; }
+.coords { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--dim); font-variant-numeric: tabular-nums; }
 .mk.is-sel { box-shadow: 0 0 0 4px #7cc9e6, 0 2px 8px rgba(0, 0, 0, .6); }
 .mk-photo { position: absolute; right: -4px; top: -4px; width: 11px; height: 11px; border-radius: 50%; background: #fff; border: 2px solid #1a1a1a; }
 

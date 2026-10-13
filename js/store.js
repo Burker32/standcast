@@ -152,7 +152,7 @@
     var r = realItems();
     var text = JSON.stringify([
       r.stands.map(function (s) { return [s.id, s.name, s.type, s.lat, s.lng, s.winds, s.notes, s.override, s.sits]; }),
-      r.marks.map(function (m) { return [m.id, m.type, m.lat, m.lng, m.note, m.photoId]; })
+      r.marks.map(function (m) { return [m.id, m.type, m.lat, m.lng, m.name || '', m.note, m.photoId]; })
     ]);
     var hash = 5381;
     for (var i = 0; i < text.length; i++) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;

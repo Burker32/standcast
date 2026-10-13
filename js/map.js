@@ -158,10 +158,11 @@
         node.style.background = t.color;
         node.appendChild(SC.markTypes.icon(m.type, 15));
         if (m.photoId) node.appendChild(el('span', 'mk-photo'));
+        if (m.name) node.appendChild(el('div', 'mk-label', m.name));
         var mk = L.marker([m.lat, m.lng], {
           icon: L.divIcon({ className: 'mk-wrap', html: node, iconSize: [30, 30], iconAnchor: [15, 15] }),
           draggable: !!it.selected, zIndexOffset: it.selected ? 900 : 100, keyboard: false,
-          title: t.label + (m.note ? ': ' + m.note.slice(0, 40) : '')
+          title: (m.name || t.label) + (m.note ? ': ' + m.note.slice(0, 40) : '')
         });
         mk.on('click', function (e) { L.DomEvent.stopPropagation(e); if (opts.onSelectMark) opts.onSelectMark(m.id); });
         mk.on('dragend', function () { var p = mk.getLatLng(); if (opts.onMoveMark) opts.onMoveMark(m.id, p.lat, p.lng); });

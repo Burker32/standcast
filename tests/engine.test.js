@@ -386,4 +386,16 @@ test('bench elevation tiles: fixed squares that cover the view', () => {
   assert.ok(Math.abs(t.cellM - 3.78) < 0.05, 'cell size ' + t.cellM);
   assert.deepEqual(E.demTiles(b, 60, 12), t);                           // same view, same squares
   assert.equal(E.demTiles({ s: 37.4, n: 37.9, w: -94.2, e: -93.5 }, 60, 12), null);   // zoomed too far out
+});test('benches: a strip that tilts a little in the middle still shows as one bench', () => {
+  const R = 100, C = 100, d = 4, z = new Float32Array(R * C);
+  for (let j = 0; j < C; j++) {
+    let h = 400;
+    for (let i = 0; i < R; i++) {
+      const onBench = i >= 45 && i <= 51, tilted = j >= 42 && j <= 58;
+      if (i) h -= d * Math.tan((onBench ? (tilted ? 7 : 2) : 20) * Math.PI / 180);
+      z[i * C + j] = h;
+    }
+  }
+  assert.equal(E.findBenches(z, R, C, d).benches.length, 1);
+  assert.equal(E.findBenches(z, R, C, d, { grow: 1 }).benches.length, 2);   // without growing it breaks in two
 });
