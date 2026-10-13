@@ -143,7 +143,7 @@
       // roads and place names drawn by USGS over whatever photo is showing (the Summer and Leaf-off photos have none)
       var px = (window.devicePixelRatio || 1) > 1.5 ? 1024 : 512;
       var part = function (svc, zi) {
-        var tl = L.tileLayer(CARTO + svc + '?{z}/{x}/{y}', { tileSize: OV_TILE, zoomOffset: -1, minZoom: 9, maxZoom: 19, opacity: opacity, crossOrigin: true,
+        var tl = L.tileLayer(CARTO + svc + '?{z}/{x}/{y}', { tileSize: OV_TILE, zoomOffset: -1, minZoom: 12, maxZoom: 19, opacity: opacity, crossOrigin: true,   // drawn on demand and slow, so only when zoomed in
           className: 'ov-labels', attribution: 'Roads and names: <a href="https://www.usgs.gov/">U.S. Geological Survey</a>', zIndex: zi });
         tl.getTileUrl = function (c) {
           var span = 2 * R / Math.pow(2, c.z) * (OV_TILE / 256), x0 = -R + c.x * span, y1 = R - c.y * span;

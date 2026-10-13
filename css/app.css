@@ -133,6 +133,7 @@ h2, h3, p { margin: 0; }
   font: 700 12.5px/1.2 var(--body); color: #fff; letter-spacing: .01em;
   text-shadow: 0 0 2px #000, 0 0 3px #000, 0 0 4px rgba(0, 0, 0, .9), 0 1px 2px #000; }
 .pl-major { font-size: 15px; }
+.pl-state { font-size: 14px; letter-spacing: .14em; text-transform: uppercase; color: #f3f0e2; }
 .pl-land { font-size: 12px; font-style: italic; color: #e6ffb8; }
 .sw-names { display: grid; place-items: center; background: #26301f !important; color: #fff; font: 700 10px/1 var(--body); }
 .sw-labels { background: linear-gradient(90deg, #fff 0 45%, #1a1a1a 45% 55%, #fff 55%) !important; border: 1px solid var(--line); }

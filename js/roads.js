@@ -29,10 +29,56 @@
   }
   function status(s) { if (onStatus) onStatus(s); }
   function schedule() { clearTimeout(timer); timer = setTimeout(load, 450); }
+  // one shared canvas for every road line (much lighter than one page element per line)
+  var cv = null;
+  function canvas() { if (!cv && L.canvas) cv = L.canvas({ padding: 0.4, tolerance: 8 }); return cv || undefined; }
+
+  /* Zoomed out, only the main highways are drawn, from the small-scale road set (one light request per view):
+   *   far out      interstates and U.S. routes, coarse
+   *   closer       the same, finer
+   *   closer still state routes join in
+   * The full detail (local roads, 4WD roads, trails) only loads at MIN_ZOOM and closer. */
+  var ovCache = {}, ovOrder = [], ovSeq = 0, ovKey = '';
+  function overview() {
+    var z = map.getZoom(), b = map.getBounds();
+    if (z < 5) { group.clearLayers(); drawn = {}; ovKey = ''; return; }
+    var tier = z < 8.5 ? 0 : z < 11 ? 1 : 2, g = tier === 0 ? 4 : tier === 1 ? 0.5 : 0.25;
+    var box = { s: Math.floor(b.getSouth() / g) * g, n: Math.ceil(b.getNorth() / g) * g, w: Math.floor(b.getWest() / g) * g, e: Math.ceil(b.getEast() / g) * g };
+    var key = [tier, box.s, box.w, box.n, box.e].join(',');
+    if (key === ovKey) return;
+    function paint(list) {
+      group.clearLayers(); drawn = {}; ovKey = key;
+      // All roads of one class go down as a single shape on a canvas: a handful of drawings instead of thousands
+      // of separate lines, which is what keeps panning smooth. Dark casings first, then the pale lines.
+      var classes = [{ w: 1.6, c: '#fff1c9', paths: [] }, { w: 2.2, c: '#fff1c9', paths: [] }, { w: 3, c: '#ffe08a', paths: [] }];
+      list.forEach(function (f) { var k = f.big ? 2 : f.w > 2 ? 1 : 0; f.paths.forEach(function (p) { classes[k].paths.push(p); }); });
+      classes.forEach(function (k) { if (k.paths.length) L.polyline(k.paths, { color: '#10140f', weight: k.w + 2.4, opacity: 0.5, interactive: false, lineCap: 'round', lineJoin: 'round', renderer: canvas() }).addTo(group); });
+      classes.forEach(function (k) { if (k.paths.length) L.polyline(k.paths, { color: k.c, weight: k.w, opacity: 0.95, interactive: false, lineCap: 'round', lineJoin: 'round', renderer: canvas() }).addTo(group); });
+    }
+    if (ovCache[key]) { paint(ovCache[key]); return; }
+    var mine = ++ovSeq, layer = tier === 0 ? 8 : 9;
+    var where = tier === 2 ? "INTERSTATE <> ' ' OR US_ROUTE <> ' ' OR ST_ROUTE <> ' '" : tier === 1 ? "INTERSTATE <> ' ' OR US_ROUTE <> ' '" : '1=1';
+    var q = 'where=' + encodeURIComponent(where) + '&geometry=' + [box.w, box.s, box.e, box.n].join('%2C') + '&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects' +
+      '&outFields=INTERSTATE,US_ROUTE&returnGeometry=true&outSR=4326&geometryPrecision=4&maxAllowableOffset=' + ((box.e - box.w) / 500).toFixed(5) + '&f=json';
+    status('loading');
+    var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    var t = setTimeout(function () { if (ctl) ctl.abort(); }, 20000);
+    fetch(URL + '/' + layer + '/query?' + q, ctl ? { signal: ctl.signal } : {}).then(function (r) { clearTimeout(t); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }).then(function (j) {
+      if (!j || !Array.isArray(j.features)) throw new Error('bad data');
+      var list = j.features.filter(function (f) { return f.geometry && f.geometry.paths; }).map(function (f) {
+        var a = f.attributes || {}, inter = String(a.INTERSTATE || '').trim(), us = String(a.US_ROUTE || '').trim();
+        return { big: !!inter, w: inter ? 3 : us ? 2.2 : 1.6, paths: f.geometry.paths.map(function (p) { return p.map(function (c) { return [c[1], c[0]]; }); }) };
+      });
+      ovCache[key] = list; ovOrder.push(key); while (ovOrder.length > 20) delete ovCache[ovOrder.shift()];
+      if (mine === ovSeq && enabled && map.getZoom() < MIN_ZOOM) paint(list);
+      status('ok');
+    }).catch(function () { clearTimeout(t); status('error'); });
+  }
 
   function load() {
     if (!enabled || !map) return;
-    if (map.getZoom() < MIN_ZOOM) { group.clearLayers(); drawn = {}; status('zoom'); return; }
+    if (map.getZoom() < MIN_ZOOM) { overview(); return; }
+    if (ovKey) { group.clearLayers(); drawn = {}; ovKey = ''; }      // coming in from the overview: swap to full detail
     var b = map.getBounds(), todo = [];
     for (var la = Math.floor(b.getSouth() / CELL); la <= Math.floor(b.getNorth() / CELL); la++) {
       for (var ln = Math.floor(b.getWest() / CELL); ln <= Math.floor(b.getEast() / CELL); ln++) {
@@ -86,11 +132,11 @@
       if (drawn[id]) return;
       var f = feats[id], kd = f.kd;
       // a dark line under a pale one, so it reads on a summer photo, a winter photo or the topo map
-      L.polyline(f.paths, { color: '#10140f', weight: kd.weight + 2.6, opacity: 0.55, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(group);
+      L.polyline(f.paths, { color: '#10140f', weight: kd.weight + 2.6, opacity: 0.55, interactive: false, lineCap: 'round', lineJoin: 'round', renderer: canvas() }).addTo(group);
       L.polyline(f.paths, { color: kd.kind === 'trail' ? '#ffffff' : '#fff1c9', weight: kd.weight, opacity: 0.95, dashArray: kd.dash || null,
-        lineCap: 'round', lineJoin: 'round', interactive: false }).addTo(group);
-      // a wide invisible line on top makes it easy to tap with a thumb
-      var hit = L.polyline(f.paths, { color: '#000', weight: 18, opacity: 0, interactive: true });
+        lineCap: 'round', lineJoin: 'round', interactive: false, renderer: canvas() }).addTo(group);
+      // the same line again, invisible but tappable; the canvas allows a thumb-sized miss (tolerance)
+      var hit = L.polyline(f.paths, { color: '#000', weight: 6, opacity: 0, interactive: true, renderer: canvas() });
       hit.on('click', function (e) {
         if (e && e.originalEvent && L.DomEvent && L.DomEvent.stopPropagation) L.DomEvent.stopPropagation(e);
         if (onTap) onTap({ kind: kd.kind, label: kd.label, name: f.name, number: f.number, surface: f.surface }, e && e.latlng);
@@ -103,7 +149,7 @@
   function setEnabled(on) {
     enabled = !!on;
     if (!group) return;
-    if (!enabled) { group.clearLayers(); drawn = {}; status('off'); }
+    if (!enabled) { group.clearLayers(); drawn = {}; ovKey = ''; status('off'); }
     else load();
   }
 
