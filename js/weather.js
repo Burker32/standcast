@@ -167,5 +167,54 @@
     });
   }
 
-  SC.weather = { loadFor: loadFor, fetchTerrain: fetchTerrain, elevations: elevations, TTL: TTL };
+  /* ---------- elevation tiles for the bench layer ----------
+   * One 256 x 256 square of lidar ground heights per web-map tile, sent as raw numbers (4 bytes a cell, north row
+   * first). The service worker keeps them for use offline. */
+  var DEM_URL = 'https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage';
+  var MERC = 20037508.342789244, demCache = {}, demOrder = [], DEM_KEEP = 24;
+  function demTile(z, x, y, px) {
+    var key = z + '/' + x + '/' + y;
+    if (demCache[key]) return demCache[key];
+    var span = 2 * MERC / Math.pow(2, z), x0 = -MERC + x * span, y1 = MERC - y * span;
+    var url = DEM_URL + '?bbox=' + [x0, y1 - span, x0 + span, y1].map(function (v) { return v.toFixed(2); }).join(',') +
+      '&bboxSR=3857&imageSR=3857&size=' + px + ',' + px + '&format=bsq&pixelType=F32&interpolation=RSP_BilinearInterpolation&f=image';
+    var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    var t = setTimeout(function () { if (ctl) ctl.abort(); }, 25000);
+    var p = fetch(url, { signal: ctl ? ctl.signal : undefined })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); })
+      .then(function (buf) {
+        clearTimeout(t);
+        var n = px * px;
+        if (buf.byteLength < n * 4) throw new Error('short elevation tile');
+        var v = new DataView(buf), out = new Float32Array(n);
+        for (var i = 0; i < n; i++) {
+          var h = v.getFloat32(i * 4, true);
+          out[i] = h > -500 && h < 9000 ? h : NaN;   // anything else is the service's "no data here" filler
+        }
+        return out;
+      });
+    p.catch(function () { clearTimeout(t); delete demCache[key]; });   // failed: let the next look try again
+    demCache[key] = p; demOrder.push(key);
+    while (demOrder.length > DEM_KEEP) delete demCache[demOrder.shift()];
+    return p;
+  }
+  // t: the block of tiles from engine.demTiles(). Resolves to { z, rows, cols, missing } with NaN where a tile failed.
+  function demMosaic(t) {
+    if (forecastBusy) return forecastBusy.then(function () { return demMosaic(t); });
+    var jobs = [];
+    for (var ty = 0; ty < t.ny; ty++) for (var tx = 0; tx < t.nx; tx++) {
+      jobs.push(demTile(t.z, t.x0 + tx, t.y0 + ty, t.px).then(function (a) { return a; }, function () { return null; }));
+    }
+    return Promise.all(jobs).then(function (tiles) {
+      var z = new Float32Array(t.rows * t.cols).fill(NaN), missing = 0;
+      tiles.forEach(function (a, k) {
+        if (!a) { missing++; return; }
+        var oy = Math.floor(k / t.nx) * t.px, ox = (k % t.nx) * t.px;
+        for (var r = 0; r < t.px; r++) z.set(a.subarray(r * t.px, (r + 1) * t.px), (oy + r) * t.cols + ox);
+      });
+      return { z: z, rows: t.rows, cols: t.cols, missing: missing, total: tiles.length };
+    });
+  }
+
+  SC.weather = { loadFor: loadFor, fetchTerrain: fetchTerrain, elevations: elevations, demMosaic: demMosaic, TTL: TTL };
 })();

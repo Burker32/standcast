@@ -183,6 +183,29 @@
       });
     }, 350);
   }
+  /* ---- benches: flat strips part-way up a hillside, worked out from lidar ground heights for the area in view.
+   * Estimated from the shape of the ground only. announce = say what happened (used when the layer is switched on). */
+  let benchTimer = 0, benchKey = '';
+  function loadBenches(announce) {
+    clearTimeout(benchTimer);
+    benchTimer = setTimeout(() => {
+      const on = !!(settings().overlays || {}).benches;
+      const t = on && M.zoom >= 15.5 ? E.demTiles(M.bounds(), 60, 12) : null;
+      if (!t) { benchKey = ''; M.renderBenches(null); if (on && announce) toast('Zoom in closer to see benches.'); return; }
+      const key = [t.x0, t.y0, t.nx, t.ny].join(',');
+      if (key === benchKey) { M.setBenchOpacity(ovOpacity('benches')); return; }
+      benchKey = key;
+      if (announce) toast('Reading the ground for benches…');
+      W.demMosaic(t).then((dem) => {
+        if (benchKey !== key) return;
+        if (dem.missing === dem.total) { benchKey = ''; if (announce) toast('Could not load the ground data for benches. Check your signal.'); return; }
+        const res = E.findBenches(dem.z, dem.rows, dem.cols, t.cellM);
+        M.renderBenches(res, t.bounds, ovOpacity('benches'));
+        if (dem.missing) benchKey = '';   // part of the area failed to load: try again on the next move
+        if (announce) toast(res.benches.length ? res.benches.length + (res.benches.length === 1 ? ' bench' : ' benches') + ' found in view (estimated).' : 'No benches found on the ground in view.');
+      }).catch(() => { benchKey = ''; });
+    }, 400);
+  }
   function nearestFc(lat, lng) {
     let best = null, bd = Infinity;
     stands().forEach((s) => { const fc = data.fc[s.id]; if (!fc) return; const d = distM(lat, lng, s.lat, s.lng); if (d < bd) { bd = d; best = fc; } });
@@ -1098,6 +1121,7 @@
       h('p', { class: 'line' }, 'Under Map layers you can show just the wind, just the thermals, or both.'),
       h('p', { class: 'line' }, 'Map photos: Summer is USDA aerial photography with the leaves on, refreshed every few years. Leaf-off is Missouri\'s statewide winter photography (north half 2023, south half 2024) with the trees bare, so you can see ridges, benches, trails and openings under the canopy. The round map button cycles Summer, Leaf-off and Topo; Hybrid is under Map layers.'),
       h('p', { class: 'line' }, 'Overlays (Map layers): Lidar terrain is USGS laser-scanned ground shape blended into the photo, so ridges, benches, saddles, ditches and old roads stand out even under timber. Crops 2025 is USDA CropScape: what was grown in each field last season (corn, soybeans, wheat, hay and so on). Each has its own strength slider and works on any base map.'),
+      h('p', { class: 'line' }, 'Benches (Map layers) shades flat strips part-way up a hillside: ground that is clearly flatter than the slope above and below it. It is worked out from the lidar ground data for the area on screen, so zoom in to use it. It only knows the shape of the ground, so treat it as places worth walking, not proof deer travel there.'),
       h('p', { class: 'line' }, 'Stand slopes and the thermal flow use the same lidar ground data (1 m where available) for a much closer read of each hillside than before.'),
       h('p', { class: 'line' }, 'Press and hold any spot on the map to add a stand or a mark right there: a target appears and you pick what it is, then tap Save. Tap the map at any point before saving to take it back off.'),
       h('p', { class: 'line' }, 'Measure yardage with the ruler button: tap points on the map (tap a stand or mark to snap to it). Each leg shows its yards and the bar shows the total. Drag any point to adjust it.'),
@@ -1158,6 +1182,7 @@
       const st = settings(); st.overlays = st.overlays || {}; st.overlays[c.dataset.ov] = c.checked; S.save(); applyOverlays(); syncLayerUi();
       if (c.checked && (c.dataset.ov === 'hillshade' || c.dataset.ov === 'contours')) toast((c.dataset.ov === 'contours' ? 'Contours' : 'Lidar terrain') + ' draw on demand, so give it a few seconds the first time.');
       if (c.checked && c.dataset.ov === 'contours' && M.zoom < 13) toast('Zoom in closer to see the 10 ft contour lines.');
+      if (c.checked && c.dataset.ov === 'benches') loadBenches(true);
       if (c.checked && c.dataset.ov === 'crops' && M.zoom > 16) toast('Crop map cells are 30 m, so it looks blocky up close.');
     }));
     pop.querySelectorAll('[data-ovop]').forEach((r) => r.addEventListener('input', () => {
@@ -1203,11 +1228,12 @@
       h('p', { class: 'lc-fine' }, 'From PAD-US, the national public land inventory. Lines can be off and public does not always mean open to hunting. Check the manager\'s maps and regulations before you go.'));
     card.hidden = false;
   }
-  const OV_DEFAULT = { hillshade: 0.6, contours: 0.9, crops: 0.45 };
+  const OV_DEFAULT = { hillshade: 0.6, contours: 0.9, crops: 0.45, benches: 0.75 };
   function ovOpacity(name) { const o = settings().ovOpacity || {}; return o[name] != null ? o[name] : OV_DEFAULT[name]; }
   function applyOverlays() {
     const on = settings().overlays || {};
     ['hillshade', 'contours', 'crops'].forEach((n) => M.setOverlay(n, !!on[n], ovOpacity(n)));
+    loadBenches();
   }
   function setBase(key) { settings().basemap = key; S.save(); M.setBasemap(key); syncLayerUi(); }
   function syncLayerUi() {
@@ -1371,7 +1397,7 @@
       onMoveMark: (id, lat, lng) => { S.updateMark(id, { lat: lat, lng: lng }); renderMap(); },
       onRotate: (b) => updateCompass(b),
       onRotateEnd: (b) => { settings().view.bearing = b; S.save(); loadField(); },
-      onMoveEnd: (c, z) => { loadField(); clearTimeout(saveTimer); saveTimer = setTimeout(() => { settings().view = { lat: c.lat, lng: c.lng, zoom: z, bearing: M.bearing() }; S.save(); }, 600); }
+      onMoveEnd: (c, z) => { loadField(); loadBenches(); clearTimeout(saveTimer); saveTimer = setTimeout(() => { settings().view = { lat: c.lat, lng: c.lng, zoom: z, bearing: M.bearing() }; S.save(); }, 600); }
     });
     try { if (SC.publand && M.leaflet) {
       SC.publand.attach(M.leaflet, {

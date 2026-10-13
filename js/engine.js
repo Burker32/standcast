@@ -357,6 +357,135 @@
     return out;
   }
 
+  /* ---------- benches ----------
+   * A bench is a strip of flatter ground part-way up a hillside, with steeper ground above and below it.
+   * Works on a square grid of ground elevations (meters), row 0 at the north edge, `cellM` meters per cell.
+   * For each flat-enough cell it looks up and down the fall line of the surrounding hillside: there must be
+   * clearly steeper ground both ways, with real climb above and real drop below, which rules out ridge tops,
+   * flats and creek bottoms. Connected cells become one bench; scraps too small to matter are dropped.
+   * An estimate from the shape of the ground only. Thresholds are in BENCH and can be passed in to tune. */
+  // Set for rolling Ozark-border hills (most slopes around Stockton Lake are under 15 degrees), not mountains.
+  var BENCH = {
+    flatMax: 6,      // degrees: a bench is no steeper than this
+    steepMin: 8,     // degrees: the ground above and below must reach at least this
+    contrast: 4,     // degrees: ...and be at least this much steeper than the bench
+    ratio: 0.5,      // the bench is at most this share of the steeper ground's slope
+    hillMin: 4,      // degrees: the broad hillside the bench sits on must slope at least this
+    probeM: 45,      // meters: how far up and down the hill to look
+    reliefM: 2,      // meters: least climb above and drop below within that distance
+    broadM: 30,      // meters: smoothing radius that defines "the hillside"
+    minAreaM2: 250,  // drop patches smaller than this
+    minLenM: 25      // ...or shorter than this from end to end
+  };
+  // Mean of each cell's (2r+1) square window. NaN where the window leaves the grid or touches missing data.
+  function boxMean(z, rows, cols, r) {
+    var W = cols + 1, sum = new Float64Array((rows + 1) * W), bad = new Int32Array((rows + 1) * W), i, j;
+    for (i = 0; i < rows; i++) {
+      var rs = 0, rb = 0;
+      for (j = 0; j < cols; j++) {
+        var v = z[i * cols + j];
+        if (v === v) rs += v; else rb++;
+        sum[(i + 1) * W + j + 1] = sum[i * W + j + 1] + rs;
+        bad[(i + 1) * W + j + 1] = bad[i * W + j + 1] + rb;
+      }
+    }
+    var out = new Float32Array(rows * cols).fill(NaN), n = (2 * r + 1) * (2 * r + 1);
+    for (i = r; i < rows - r; i++) for (j = r; j < cols - r; j++) {
+      var a = (i - r) * W + (j - r), b = (i - r) * W + (j + r + 1), c = (i + r + 1) * W + (j - r), d = (i + r + 1) * W + (j + r + 1);
+      if (bad[d] - bad[b] - bad[c] + bad[a]) continue;
+      out[i * cols + j] = (sum[d] - sum[b] - sum[c] + sum[a]) / n;
+    }
+    return out;
+  }
+  function findBenches(z, rows, cols, cellM, opts) {
+    var o = {}, k;
+    for (k in BENCH) o[k] = opts && opts[k] != null ? opts[k] : BENCH[k];
+    var n = rows * cols, i, j, idx;
+    var zs = boxMean(z, rows, cols, 1);                       // light smoothing: takes the lidar chatter out
+    var slope = new Float32Array(n).fill(NaN);
+    for (i = 1; i < rows - 1; i++) for (j = 1; j < cols - 1; j++) {
+      idx = i * cols + j;
+      var gx = (zs[idx + 1] - zs[idx - 1]) / (2 * cellM), gy = (zs[idx - cols] - zs[idx + cols]) / (2 * cellM);
+      slope[idx] = Math.atan(Math.hypot(gx, gy)) / DEG;       // NaN if any neighbour is missing
+    }
+    var rb = Math.max(2, Math.round(o.broadM / cellM)), kb = Math.max(1, Math.round(o.broadM / 2 / cellM));
+    var zb = boxMean(z, rows, cols, rb);                      // the hillside with its small wrinkles ironed out
+    var steps = Math.max(2, Math.round(o.probeM / cellM)), hillMin = Math.tan(o.hillMin * DEG);
+    var cand = new Uint8Array(n);
+    // steepest ground met walking `steps` cells from (i, j) along (di, dj), and the height change at the far end
+    function probe(i0, j0, di, dj) {
+      var mx = 0, r = 0, c = 0;
+      for (var t = 1; t <= steps; t++) {
+        r = Math.round(i0 + di * t); c = Math.round(j0 + dj * t);
+        if (r < 0 || c < 0 || r >= rows || c >= cols) return null;
+        var s = slope[r * cols + c];
+        if (s !== s) return null;
+        if (s > mx) mx = s;
+      }
+      return { max: mx, dz: zs[r * cols + c] - zs[i0 * cols + j0] };
+    }
+    for (i = kb; i < rows - kb; i++) for (j = kb; j < cols - kb; j++) {
+      idx = i * cols + j;
+      var s0 = slope[idx];
+      if (!(s0 <= o.flatMax)) continue;
+      var bx = (zb[idx + kb] - zb[idx - kb]) / (2 * kb * cellM), by = (zb[idx - kb * cols] - zb[idx + kb * cols]) / (2 * kb * cellM);
+      var gm = Math.hypot(bx, by);
+      if (!(gm >= hillMin)) continue;                         // not on a hillside (or no data)
+      var ux = bx / gm, uy = by / gm;                         // unit vector pointing uphill (east, north)
+      var need = Math.max(o.steepMin, s0 + o.contrast);
+      var up = probe(i, j, -uy, ux);
+      if (!up || up.max < need || up.dz < o.reliefM) continue;
+      var dn = probe(i, j, uy, -ux);
+      if (!dn || dn.max < need || -dn.dz < o.reliefM) continue;
+      if (s0 > o.ratio * Math.min(up.max, dn.max)) continue;
+      cand[idx] = 1;
+    }
+    // join touching cells into benches and drop the scraps
+    var mask = new Uint8Array(n), seen = new Uint8Array(n), stack = new Int32Array(n), benches = [];
+    for (var start = 0; start < n; start++) {
+      if (!cand[start] || seen[start]) continue;
+      var top = 0, members = [], r0 = rows, r1 = -1, c0 = cols, c1 = -1, zsum = 0;
+      stack[top++] = start; seen[start] = 1;
+      while (top) {
+        var q = stack[--top], qi = (q / cols) | 0, qj = q - qi * cols;
+        members.push(q); zsum += zs[q];
+        if (qi < r0) r0 = qi; if (qi > r1) r1 = qi; if (qj < c0) c0 = qj; if (qj > c1) c1 = qj;
+        for (var a = -1; a <= 1; a++) for (var b = -1; b <= 1; b++) {
+          var ni = qi + a, nj = qj + b;
+          if ((!a && !b) || ni < 0 || nj < 0 || ni >= rows || nj >= cols) continue;
+          var nq = ni * cols + nj;
+          if (cand[nq] && !seen[nq]) { seen[nq] = 1; stack[top++] = nq; }
+        }
+      }
+      var area = members.length * cellM * cellM, len = Math.hypot(r1 - r0 + 1, c1 - c0 + 1) * cellM;
+      if (area < o.minAreaM2 || len < o.minLenM) continue;
+      for (k = 0; k < members.length; k++) mask[members[k]] = 1;
+      benches.push({ cells: members.length, areaM2: area, lenM: len, row: (r0 + r1) / 2, col: (c0 + c1) / 2, elevM: zsum / members.length });
+    }
+    return { mask: mask, benches: benches, rows: rows, cols: cols };
+  }
+
+  /* Ground-elevation tiles for the bench layer: standard web-map tiles at one fixed zoom, 256 cells a side,
+   * so the same squares are asked for every time and can be kept for use with no signal.
+   * Returns the block of tiles covering bounds {s,w,n,e} plus a margin, or null if that is too many tiles. */
+  var DEM_ZOOM = 15, DEM_PX = 256;
+  function demTiles(b, padM, maxTiles) {
+    var n = Math.pow(2, DEM_ZOOM), pad = (padM || 0) / 111320, mid = (b.s + b.n) / 2;
+    var padLng = pad / Math.cos(mid * DEG);
+    function tx(lng) { return Math.floor((lng + 180) / 360 * n); }
+    function ty(lat) { var r = lat * DEG; return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n); }
+    function lat(y) { return Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))) / DEG; }
+    function lng(x) { return x / n * 360 - 180; }
+    var x0 = tx(b.w - padLng), x1 = tx(b.e + padLng), y0 = ty(b.n + pad), y1 = ty(b.s - pad);
+    var nx = x1 - x0 + 1, ny = y1 - y0 + 1;
+    if (nx < 1 || ny < 1 || nx * ny > (maxTiles || 12)) return null;
+    return {
+      z: DEM_ZOOM, x0: x0, y0: y0, nx: nx, ny: ny, px: DEM_PX, cols: nx * DEM_PX, rows: ny * DEM_PX,
+      bounds: { n: lat(y0), s: lat(y1 + 1), w: lng(x0), e: lng(x1 + 1) },
+      cellM: 40075016.686 / n / DEM_PX * Math.cos(mid * DEG)   // ground size of one cell at this latitude
+    };
+  }
+
   /* ---------- forecast ---------- */
 
   function fillNulls(a, fallback) {
@@ -638,6 +767,7 @@
     solarPosition: solarPosition,
     terrainFromSamples: terrainFromSamples, terrainProbePoints: terrainProbePoints, offsetLatLng: offsetLatLng, resolveTerrain: resolveTerrain,
     flowGrid: flowGrid, flowCells: flowCells,
+    findBenches: findBenches, demTiles: demTiles, BENCH: BENCH,
     thermal: thermal, swirl: swirl, swirlSpots: swirlSpots, heatIndex: heatIndex, thermalWords: thermalWords, thermalSwitches: thermalSwitches,
     normalizeForecast: normalizeForecast, sampleForecast: sampleForecast, nowMinFor: nowMinFor,
     windRating: windRating, isConfigured: isConfigured, ratingClass: ratingClass,

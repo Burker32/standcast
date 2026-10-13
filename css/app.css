@@ -16,6 +16,7 @@
   --map-rise: #ff8a4c;
   --map-sink: #c3a9ff;
   --map-swirl: #ff5fd2;
+  --map-bench: #35e0d0;
   --swirl: #a8237f;
   --good: #2c7a31;
   --ok: #8f6f00;
@@ -523,6 +524,8 @@ textarea { resize: vertical; min-height: 96px; line-height: 1.4; }
 .ov-hillshade { mix-blend-mode: multiply; filter: contrast(1.45) brightness(1.06); }
 .pop { max-height: calc(100% - 140px); overflow-y: auto; }
 
+.sw-bench { background: var(--map-bench) !important; border: 2px solid #0c282c; }
+.ov-bench { image-rendering: auto; }
 .sw-cont { background: repeating-linear-gradient(90deg, #2a2118 0 3px, transparent 3px 6px), #e9e2cf !important; }
 /* contour lines come back black; turn them a light tan with a dark edge so they read on dark photos */
 .ov-contours { filter: drop-shadow(0 0 1px rgba(255,255,255,.9)) drop-shadow(0 0 1px rgba(255,255,255,.6)); }   /* dark lines with a light edge: readable on leaf-off, summer and topo */

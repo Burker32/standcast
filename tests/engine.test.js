@@ -334,3 +334,56 @@ test('swirl spots: a hollow where draining air meets wind pushing up it', () => 
   const near = spots.filter((p) => Math.abs(p.lng - axisLng) / dLng <= 2);
   assert.ok(near.length >= 1, 'a swirl spot should sit in or right beside the hollow: ' + JSON.stringify(spots.map((p) => ((p.lng - axisLng) / dLng).toFixed(1) + p.kind)));
 });
+
+// ---- benches ----
+// A hillside that falls away to the south; `slopeAt(row)` gives the slope in degrees at each row.
+function hillside(rows, cols, cellM, slopeAt) {
+  const z = new Float32Array(rows * cols);
+  let h = 400;
+  for (let i = 0; i < rows; i++) {
+    if (i) h -= cellM * Math.tan(slopeAt(i) * Math.PI / 180);
+    for (let j = 0; j < cols; j++) z[i * cols + j] = h;
+  }
+  return z;
+}
+test('benches: finds a flat strip part-way up a hillside and nothing else', () => {
+  const R = 100, C = 100, d = 4;
+  const z = hillside(R, C, d, (i) => (i >= 45 && i <= 51 ? 2 : 20));
+  const out = E.findBenches(z, R, C, d);
+  assert.equal(out.benches.length, 1);
+  let inBand = 0, outside = 0;
+  for (let i = 0; i < R; i++) for (let j = 0; j < C; j++) if (out.mask[i * C + j]) { if (i >= 44 && i <= 52) inBand++; else outside++; }
+  assert.ok(inBand > 150, 'bench cells found: ' + inBand);
+  assert.equal(outside, 0);
+  assert.ok(out.benches[0].lenM > 200, 'runs along the hill: ' + out.benches[0].lenM);
+  assert.ok(Math.abs(out.benches[0].row - 48) <= 2);
+});
+test('benches: an even slope, flat ground, a ridge top and a creek bottom are not benches', () => {
+  const R = 100, C = 100, d = 4, none = (z) => E.findBenches(z, R, C, d).benches.length;
+  assert.equal(none(hillside(R, C, d, () => 20)), 0);                    // even slope
+  assert.equal(none(hillside(R, C, d, () => 0.5)), 0);                   // flat field
+  assert.equal(none(hillside(R, C, d, (i) => (i < 40 ? 1 : 20))), 0);    // flat top, then it drops away
+  assert.equal(none(hillside(R, C, d, (i) => (i < 60 ? 20 : 1))), 0);    // hill, then a flat bottom
+});
+test('benches: a small scrap is dropped, and missing data does not crash it', () => {
+  const R = 100, C = 100, d = 4;
+  const z = hillside(R, C, d, (i) => (i >= 45 && i <= 51 ? 2 : 20));
+  // keep the bench only in a 3-cell-wide sliver: too small to count
+  const steep = hillside(R, C, d, () => 20);
+  for (let i = 0; i < R; i++) for (let j = 0; j < C; j++) if (j < 48 || j > 50) z[i * C + j] = steep[i * C + j];
+  assert.equal(E.findBenches(z, R, C, d).benches.length, 0);
+  const holes = hillside(R, C, d, (i) => (i >= 45 && i <= 51 ? 2 : 20));
+  for (let k = 0; k < 400; k++) holes[(k * 37) % (R * C)] = NaN;
+  assert.ok(E.findBenches(holes, R, C, d).mask.length === R * C);
+  assert.equal(E.findBenches(new Float32Array(R * C).fill(NaN), R, C, d).benches.length, 0);
+});
+test('bench elevation tiles: fixed squares that cover the view', () => {
+  const b = { s: 37.625, n: 37.639, w: -93.816, e: -93.808 };          // about a phone screen at zoom 16
+  const t = E.demTiles(b, 60, 12);
+  assert.ok(t && t.nx * t.ny <= 6, 'a handful of tiles');
+  assert.ok(t.bounds.n >= b.n && t.bounds.s <= b.s && t.bounds.w <= b.w && t.bounds.e >= b.e);
+  assert.equal(t.cols, t.nx * 256); assert.equal(t.rows, t.ny * 256);
+  assert.ok(Math.abs(t.cellM - 3.78) < 0.05, 'cell size ' + t.cellM);
+  assert.deepEqual(E.demTiles(b, 60, 12), t);                           // same view, same squares
+  assert.equal(E.demTiles({ s: 37.4, n: 37.9, w: -94.2, e: -93.5 }, 60, 12), null);   // zoomed too far out
+});

@@ -254,6 +254,31 @@
       L.polyline(line, { color: col, opacity: op, weight: 2.2, lineCap: 'round', lineJoin: 'round', interactive: false, renderer: fieldRenderer }).addTo(g.field);
     });
   }
+  /* ---------- benches ----------
+   * res: { mask, rows, cols } from engine.findBenches, bounds {n,s,w,e} of that grid. Painted once into a small
+   * picture (one dot per ground cell) and stretched over the map, so it pans, zooms and turns with it. */
+  var benchLayer = null;
+  function renderBenches(res, bounds, opacity) {
+    if (benchLayer) { map.removeLayer(benchLayer); benchLayer = null; }
+    if (!res || !res.benches.length) return;
+    var cv = document.createElement('canvas'), R = res.rows, C = res.cols, m = res.mask;
+    cv.width = C; cv.height = R;
+    var ctx = cv.getContext('2d'), img = ctx.createImageData(C, R), d = img.data;
+    var hex = cssVar('--map-bench').replace('#', ''), n = parseInt(hex.length === 3 ? hex.replace(/./g, '$&$&') : hex, 16);
+    var cr = n >> 16 & 255, cg = n >> 8 & 255, cb = n & 255;
+    for (var i = 0; i < R; i++) for (var j = 0; j < C; j++) {
+      var k = i * C + j; if (!m[k]) continue;
+      // cells on the rim are drawn dark, so each bench gets an outline that shows on any photo
+      var edge = i === 0 || j === 0 || i === R - 1 || j === C - 1 || !m[k - 1] || !m[k + 1] || !m[k - C] || !m[k + C];
+      var o = k * 4;
+      if (edge) { d[o] = 12; d[o + 1] = 40; d[o + 2] = 44; d[o + 3] = 235; }
+      else { d[o] = cr; d[o + 1] = cg; d[o + 2] = cb; d[o + 3] = 150; }
+    }
+    ctx.putImageData(img, 0, 0);
+    benchLayer = L.imageOverlay(cv.toDataURL('image/png'), [[bounds.s, bounds.w], [bounds.n, bounds.e]], { opacity: opacity, interactive: false, className: 'ov-bench' }).addTo(map);
+  }
+  function setBenchOpacity(o) { if (benchLayer) benchLayer.setOpacity(o); }
+
   /* ---------- measuring ----------
    * pts: [{lat,lng}], legs: ['143 yd', ...], total: '312 yd'. Points are draggable; labels stay upright. */
   function renderMeasure(m, cb) {
@@ -435,6 +460,6 @@
   SC.map = {
     BASES: BASES, init: init, setBasemap: setBasemap, render: render, renderField: renderField, bounds: bounds, flyTo: flyTo, fitPoints: fitPoints,
     center: center, setPlacing: setPlacing, invalidate: invalidate, locate: locate, watch: watch, unwatch: unwatch, watching: watching, cacheArea: cacheArea,
-    panByPixels: panByPixels, setPending: setPending, renderMeasure: renderMeasure, setOverlay: setOverlay, OVER: OVER, get leaflet() { return map; }, bearing: bearing, setBearing: setBearing, setFollow: setFollow, setHeading: setHeading, get following() { return follow; }, get lastFix() { return lastFix; }, get canRotate() { return !!map.setBearing; }, get basemap() { return baseKey; }, get zoom() { return map.getZoom(); }
+    panByPixels: panByPixels, setPending: setPending, renderBenches: renderBenches, setBenchOpacity: setBenchOpacity, renderMeasure: renderMeasure, setOverlay: setOverlay, OVER: OVER, get leaflet() { return map; }, bearing: bearing, setBearing: setBearing, setFollow: setFollow, setHeading: setHeading, get following() { return follow; }, get lastFix() { return lastFix; }, get canRotate() { return !!map.setBearing; }, get basemap() { return baseKey; }, get zoom() { return map.getZoom(); }
   };
 })();
