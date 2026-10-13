@@ -126,6 +126,15 @@ h2, h3, p { margin: 0; }
 .rk { width: 22px; height: 0; border-top: 3px solid var(--fg); }
 .rk-track { border-top-style: dashed; }
 .rk-trail { border-top-style: dotted; }
+/* names written on the map: towns in white, public land in pale green italics, both with a dark edge so they
+   read on a summer photo, a winter photo or the pale topo map */
+.pl-wrap { background: none; border: 0; pointer-events: none; }
+.pl { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); white-space: nowrap; pointer-events: none;
+  font: 700 12.5px/1.2 var(--body); color: #fff; letter-spacing: .01em;
+  text-shadow: 0 0 2px #000, 0 0 3px #000, 0 0 4px rgba(0, 0, 0, .9), 0 1px 2px #000; }
+.pl-major { font-size: 15px; }
+.pl-land { font-size: 12px; font-style: italic; color: #e6ffb8; }
+.sw-names { display: grid; place-items: center; background: #26301f !important; color: #fff; font: 700 10px/1 var(--body); }
 .sw-labels { background: linear-gradient(90deg, #fff 0 45%, #1a1a1a 45% 55%, #fff 55%) !important; border: 1px solid var(--line); }
 @media (max-width: 365px) { .brand-name { display: none; } .brand { padding-right: 10px; } }
 @media (min-width: 960px) { .searchbox { left: auto; right: 14px; width: 420px; } }

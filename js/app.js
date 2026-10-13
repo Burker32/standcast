@@ -1192,7 +1192,8 @@
       h('p', { class: 'line' }, 'Map photos: Summer is USDA aerial photography with the leaves on, refreshed every few years. Leaf-off is winter photography with the trees bare, so you can see ridges, benches, trails and openings under the canopy. It covers Missouri (2023 and 2024) and Wisconsin (2018 to 2024, by county); anywhere else it shows the summer photo. The round map button cycles Summer, Leaf-off and Topo; Hybrid is under Map layers.'),
       h('p', { class: 'line' }, 'Overlays (Map layers): Lidar terrain is USGS laser-scanned ground shape blended into the photo, so ridges, benches, saddles, ditches and old roads stand out even under timber. Crops 2025 is USDA CropScape: what was grown in each field last season (corn, soybeans, wheat, hay and so on). Each has its own strength slider and works on any base map.'),
       h('p', { class: 'line' }, 'Find a place with the magnifier at the top: type a town, lake, creek, landform or piece of public land anywhere in the country and tap a result to go there. Add a state, like “Stockton WI”, to narrow it. Coordinates such as 37.8096, -93.6250 work too. For a street address, give the town and state or a ZIP, like “100 South St, Stockton, MO”. Road names are searched within about 25 miles of where the map is looking.'),
-      h('p', { class: 'line' }, 'Roads and trails (Map layers) draws lines over any map: a solid line is a road, long dashes are a 4WD or closed road, and dots are a trail. Tap a line for its name. It comes from national road and trail records, so many woods roads and most unofficial trails are missing. Road and place names adds the name labels.'),
+      h('p', { class: 'line' }, 'Roads and trails (Map layers) draws lines over any map: a solid line is a road, long dashes are a 4WD or closed road, and dots are a trail. Tap a line for its name. It comes from national road and trail records, so many woods roads and most unofficial trails are missing. Road names and route numbers adds road labels.'),
+      h('p', { class: 'line' }, 'Town names and the names of public land are written on every map. Towns show in white and public land in pale green italics; smaller places appear as you zoom in, and names that would overlap are left out. Switch them off under Map layers (Town and public land names).'),
       h('p', { class: 'line' }, 'Benches (Map layers) shades flat strips part-way up a hillside: ground that is clearly flatter than the slope above and below it. It is worked out from the lidar ground data for the area on screen, so zoom in to use it. It only knows the shape of the ground, so treat it as places worth walking, not proof deer travel there.'),
       h('p', { class: 'line' }, 'Saddles and Funnels (Map layers) show as small dark badges with a green rim, only the strongest few in view so the map stays readable. A round badge is a saddle: a low gap in a ridge. A square badge is a funnel: easy walking squeezed between steep ground or water. Tap a badge to see what it found. Like benches, they come from the shape of the ground only.'),
       h('p', { class: 'line' }, 'Stand slopes and the thermal flow use the same lidar ground data (1 m where available) for a much closer read of each hillside than before.'),
@@ -1352,14 +1353,15 @@
     const on = settings().overlays || {};
     ['hillshade', 'contours', 'crops', 'labels'].forEach((n) => M.setOverlay(n, !!on[n], ovOpacity(n)));
     if (SC.roads) SC.roads.setEnabled(!!on.roadlines);
+    if (SC.labels) SC.labels.setEnabled(on.names !== false);   // on unless switched off
     loadBenches(); loadSpots();
   }
-  function setBase(key) { settings().basemap = key; S.save(); M.setBasemap(key); syncLayerUi(); }
+  function setBase(key) { settings().basemap = key; S.save(); M.setBasemap(key); syncLayerUi(); if (SC.labels) SC.labels.refresh(); }
   function syncLayerUi() {
     const pop = $('layers'), st = settings();
     pop.querySelectorAll('[data-base]').forEach((b) => { const on = b.dataset.base === st.basemap; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
     const ovs = st.overlays || {};
-    pop.querySelectorAll('[data-ov]').forEach((c) => { c.checked = !!ovs[c.dataset.ov]; });
+    pop.querySelectorAll('[data-ov]').forEach((c) => { c.checked = c.dataset.ov === 'names' ? ovs.names !== false : !!ovs[c.dataset.ov]; });
     pop.querySelectorAll('[data-ovop]').forEach((r) => { r.value = Math.round(ovOpacity(r.dataset.ovop) * 100); r.disabled = !ovs[r.dataset.ovop]; });
     pop.querySelector('.crop-key').classList.toggle('off', !ovs.crops);
     pop.querySelectorAll('[data-air]').forEach((b) => { const on = b.dataset.air === (st.airMode || 'both'); b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
@@ -1525,6 +1527,9 @@
       });
       SC.publand.setEnabled(settings().layers.publand !== false);
     } } catch (e) { console.warn('public land layer off', e); }
+    // The topo and hybrid maps already print town names, so ours are only added on the photo maps.
+    try { if (SC.labels && M.leaflet) SC.labels.attach(M.leaflet, { showTowns: () => settings().basemap !== 'topo' && settings().basemap !== 'hybrid' }); }
+    catch (e) { console.warn('map names off', e); }
     try { if (SC.roads && M.leaflet) {
       SC.roads.attach(M.leaflet, {
         onTap: (info, ll) => {

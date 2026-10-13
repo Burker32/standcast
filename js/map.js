@@ -152,7 +152,7 @@
         };
         return tl;
       };
-      lay = L.layerGroup([part('transportation', 7), part('geonames', 8)]);
+      lay = L.layerGroup([part('transportation', 7)]);   // town and public land names are written by labels.js
       lay.setOpacity = function (o) { lay.eachLayer(function (l) { l.setOpacity(o); }); };
     } else if (name === 'crops') {
       if (!L.tileLayer.wms || !L.CRS) return;
