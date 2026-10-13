@@ -11,7 +11,7 @@ A bowhunting app that answers "which stand tonight?" It models wind, thermals, s
   2. Bump `VERSION` in `sw.js`.
   3. Run `npm test`, and `node --check` on each edited JS file.
   4. Commit and push to `main`. GitHub Pages rebuilds the site by itself, usually within a minute or two.
-- **Every deploy must bump `VERSION` in `sw.js`** (currently `'v28'`). The service worker serves cache-first, so phones keep the old app until the version changes. After a deploy, the owner closes and reopens the app once.
+- **Every deploy must bump `VERSION` in `sw.js`** (currently `'v29'`). The service worker serves cache-first, so phones keep the old app until the version changes. After a deploy, the owner closes and reopens the app once.
 - The app is served from the `/standcast/` subfolder, so every path in `index.html`, `manifest.webmanifest` and `sw.js` must stay relative (no leading `/`).
 - The repo is public. `CLAUDE.local.md` and zip files are kept out by `.gitignore`. Check `git status` before committing so nothing private goes up.
 - The empty `.nojekyll` file tells GitHub Pages to serve the files as they are.
@@ -25,7 +25,7 @@ Scripts load in this order in `index.html`: engine, exif, marktypes, store, weat
   - `thermal()`: potential, heat index and when thermals switch direction.
   - `swirl()`: fight between thermals and wind, and lee eddies. `CANOPY = 0.3` is the wind under the trees as a share of forecast wind.
   - `flowGrid`/`flowCells`: grid spacing 45 m at zoom 17 or more, up to 300 m when zoomed out.
-  - `findBenches()`: flat strips part-way up a hillside, from a grid of lidar ground heights. A cell counts when it is flat (`BENCH.flatMax`) and there is clearly steeper ground, with real climb and drop, both up and down the fall line. Thresholds are in `BENCH`, set for the gentle hills around Stockton Lake. `demTiles()` picks the fixed zoom-15 elevation squares for the view; `weather.js` `demMosaic()` fetches them (raw 32-bit floats, `format=bsq`), `map.js` `renderBenches()` paints them, and `sw.js` keeps them in the `sc-dem-v1` cache.
+  - `findBenches()`: flat strips part-way up a hillside, from a grid of lidar ground heights. A cell counts when it is flat (`BENCH.flatMax`) and there is clearly steeper ground, with real climb and drop, both up and down the fall line. Thresholds are in `BENCH`, set for the gentle hills around Stockton Lake. `demTiles()` picks fixed elevation squares for the view (tile zoom 16, about 2 m cells, or 17 when zoomed right in; zoom 15 was too coarse to see a 20 ft wide bench or road bed); `weather.js` `demMosaic()` fetches them (raw 32-bit floats, `format=bsq`), `map.js` `renderBenches()` paints them, and `sw.js` keeps them in the `sc-dem-v1` cache.
   - `swirlSpots()`:
     - Pass 1 computes the air vector on each grid cell.
     - Pass 2 computes how much the air turns (vorticity) and how much flows collide (convergence).

@@ -171,7 +171,7 @@
    * One 256 x 256 square of lidar ground heights per web-map tile, sent as raw numbers (4 bytes a cell, north row
    * first). The service worker keeps them for use offline. */
   var DEM_URL = 'https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage';
-  var MERC = 20037508.342789244, demCache = {}, demOrder = [], DEM_KEEP = 24;
+  var MERC = 20037508.342789244, demCache = {}, demOrder = [], DEM_KEEP = 40;
   function demTile(z, x, y, px) {
     var key = z + '/' + x + '/' + y;
     if (demCache[key]) return demCache[key];

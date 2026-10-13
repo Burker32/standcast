@@ -190,9 +190,11 @@
     clearTimeout(benchTimer);
     benchTimer = setTimeout(() => {
       const on = !!(settings().overlays || {}).benches;
-      const t = on && M.zoom >= 15.5 ? E.demTiles(M.bounds(), 60, 12) : null;
+      // Ground cells of about 2 yd (1 yd when zoomed right in): fine enough to see a bench or old road bed only
+      // 20 ft wide. Coarser data smears those into the hillside, so the layer needs a close zoom.
+      const t = on && M.zoom >= 16 ? E.demTiles(M.bounds(), 60, 16, M.zoom >= 17.25 ? 17 : 16) : null;
       if (!t) { benchKey = ''; M.renderBenches(null); if (on && announce) toast('Zoom in closer to see benches.'); return; }
-      const key = [t.x0, t.y0, t.nx, t.ny].join(',');
+      const key = [t.z, t.x0, t.y0, t.nx, t.ny].join(',');
       if (key === benchKey) { M.setBenchOpacity(ovOpacity('benches')); return; }
       benchKey = key;
       if (announce) toast('Reading the ground for benches…');

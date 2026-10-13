@@ -373,6 +373,7 @@
     hillMin: 4,      // degrees: the broad hillside the bench sits on must slope at least this
     probeM: 45,      // meters: how far up and down the hill to look
     reliefM: 2,      // meters: least climb above and drop below within that distance
+    smoothM: 2,      // meters: smoothing radius that takes out lidar chatter (never less than one cell)
     broadM: 30,      // meters: smoothing radius that defines "the hillside"
     grow: 1.35,      // how much easier the test is for cells touching a certain bench cell (1 = no growing)
     minAreaM2: 250,  // drop patches smaller than this
@@ -402,7 +403,7 @@
     var o = {}, k;
     for (k in BENCH) o[k] = opts && opts[k] != null ? opts[k] : BENCH[k];
     var n = rows * cols, i, j, idx;
-    var zs = boxMean(z, rows, cols, 1);                       // light smoothing: takes the lidar chatter out
+    var zs = boxMean(z, rows, cols, Math.max(1, Math.round(o.smoothM / cellM)));   // light smoothing: takes the lidar chatter out
     var slope = new Float32Array(n).fill(NaN);
     for (i = 1; i < rows - 1; i++) for (j = 1; j < cols - 1; j++) {
       idx = i * cols + j;
@@ -474,8 +475,8 @@
    * so the same squares are asked for every time and can be kept for use with no signal.
    * Returns the block of tiles covering bounds {s,w,n,e} plus a margin, or null if that is too many tiles. */
   var DEM_ZOOM = 15, DEM_PX = 256;
-  function demTiles(b, padM, maxTiles) {
-    var n = Math.pow(2, DEM_ZOOM), pad = (padM || 0) / 111320, mid = (b.s + b.n) / 2;
+  function demTiles(b, padM, maxTiles, zoom) {
+    var tz = zoom || DEM_ZOOM, n = Math.pow(2, tz), pad = (padM || 0) / 111320, mid = (b.s + b.n) / 2;
     var padLng = pad / Math.cos(mid * DEG);
     function tx(lng) { return Math.floor((lng + 180) / 360 * n); }
     function ty(lat) { var r = lat * DEG; return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n); }
@@ -485,7 +486,7 @@
     var nx = x1 - x0 + 1, ny = y1 - y0 + 1;
     if (nx < 1 || ny < 1 || nx * ny > (maxTiles || 12)) return null;
     return {
-      z: DEM_ZOOM, x0: x0, y0: y0, nx: nx, ny: ny, px: DEM_PX, cols: nx * DEM_PX, rows: ny * DEM_PX,
+      z: tz, x0: x0, y0: y0, nx: nx, ny: ny, px: DEM_PX, cols: nx * DEM_PX, rows: ny * DEM_PX,
       bounds: { n: lat(y0), s: lat(y1 + 1), w: lng(x0), e: lng(x1 + 1) },
       cellM: 40075016.686 / n / DEM_PX * Math.cos(mid * DEG)   // ground size of one cell at this latitude
     };
