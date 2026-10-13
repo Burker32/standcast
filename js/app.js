@@ -381,6 +381,7 @@
   function drawSheet() {
     const body = $('sheet-body'), key = ui.view + ':' + ui.tab + ':' + (ui.selStand || ui.selMark || '') + ':' + (stands().length ? 'has' : 'none') + ':' + (data.ref ? 'fc' : 'nofc');
     const keep = key === lastKey ? body.scrollTop : 0; lastKey = key;
+    if (ui.view !== 'add') clearPending();   // left the chooser without picking
     let node;
     if (ui.view === 'add') node = addView();
     else if (ui.view === 'photo') node = photoAddView();
@@ -727,15 +728,39 @@
 
   /* ---- add flow ---- */
   function addView() {
-    const root = h('div', { class: 'view' });
-    root.appendChild(backHeader('Add to the map', () => go('list')));
+    const root = h('div', { class: 'view' }), held = ui.pending;
+    // held = you pressed and held a spot, so whatever you pick goes straight there
+    const pick = (k) => { if (held) placePending(k); else startPlacing(k); };
+    root.appendChild(backHeader(held ? 'Add at this spot' : 'Add to the map', () => go('list')));
+    if (held) root.appendChild(h('p', { class: 'fine' }, 'Pick what goes at the spot you held. Tap the back arrow to cancel.'));
     root.appendChild(h('div', { class: 'tiles' },
-      h('button', { class: 'tile', type: 'button', onclick: () => startPlacing('stand') }, h('span', { class: 'type-dot stand-dot' }, icon('stands', 18)), 'Stand'),
-      MT.ORDER.map((k) => h('button', { class: 'tile', type: 'button', onclick: () => startPlacing(k) },
+      h('button', { class: 'tile', type: 'button', onclick: () => pick('stand') }, h('span', { class: 'type-dot stand-dot' }, icon('stands', 18)), 'Stand'),
+      MT.ORDER.map((k) => h('button', { class: 'tile', type: 'button', onclick: () => pick(k) },
         h('span', { class: 'type-dot', style: 'background:' + MT.TYPES[k].color }, MT.icon(k, 18)), MT.TYPES[k].label))));
+    if (held) return root;
     root.appendChild(h('button', { class: 'btn wide-btn', type: 'button', onclick: () => go('photo') }, icon('photo', 16), 'Add a photo'));
-    root.appendChild(h('p', { class: 'fine' }, 'Take a photo at the sign and the pin drops where you are standing.'));
+    root.appendChild(h('p', { class: 'fine' }, 'Take a photo at the sign and the pin drops where you are standing. You can also press and hold any spot on the map to add something there.'));
     return root;
+  }
+  /* ---- press and hold the map: choose what goes at that spot ---- */
+  function clearPending() { if (ui.pending) { ui.pending = null; M.setPending(null); } }
+  function holdAt(lat, lng) {
+    if (ui.measure) return;
+    if (ui.placing) return placeAt(lat, lng);
+    ui.pending = { lat: lat, lng: lng };
+    M.setPending(ui.pending);
+    if (navigator.vibrate) { try { navigator.vibrate(15); } catch (e) { /* not allowed, no matter */ } }
+    $('landcard').hidden = true;
+    if (isMobile() && ui.sheet !== 'half') setSheet('half');
+    go('add');
+    // keep the held spot in view above the panel
+    if (isMobile()) M.flyTo(lat, lng, M.zoom, $('sheet').offsetHeight);
+  }
+  function placePending(kind) {
+    const p = ui.pending; if (!p) return;
+    clearPending();
+    ui.placing = { kind: kind, file: null };
+    placeAt(p.lat, p.lng);
   }
   function placingView() {
     const k = ui.placing ? ui.placing.kind : 'stand';
@@ -1021,6 +1046,7 @@
       h('p', { class: 'line' }, 'Map photos: Summer is USDA aerial photography with the leaves on, refreshed every few years. Leaf-off is Missouri\'s statewide winter photography (north half 2023, south half 2024) with the trees bare, so you can see ridges, benches, trails and openings under the canopy. The round map button cycles Summer, Leaf-off and Topo; Hybrid is under Map layers.'),
       h('p', { class: 'line' }, 'Overlays (Map layers): Lidar terrain is USGS laser-scanned ground shape blended into the photo, so ridges, benches, saddles, ditches and old roads stand out even under timber. Crops 2025 is USDA CropScape: what was grown in each field last season (corn, soybeans, wheat, hay and so on). Each has its own strength slider and works on any base map.'),
       h('p', { class: 'line' }, 'Stand slopes and the thermal flow use the same lidar ground data (1 m where available) for a much closer read of each hillside than before.'),
+      h('p', { class: 'line' }, 'Press and hold any spot on the map to add a stand or a mark right there: a target appears and you pick what it is.'),
       h('p', { class: 'line' }, 'Measure yardage with the ruler button: tap points on the map (tap a stand or mark to snap to it). Each leg shows its yards and the bar shows the total. Drag any point to adjust it.'),
       h('p', { class: 'line' }, 'Tap the locate button to follow yourself: the map keeps you in the middle as you walk and turns around you. Drag the map to stop following.'),
       h('p', { class: 'line' }, 'Turn the map with a two-finger twist (on a computer, hold Shift and drag). The compass needle always points north. Tap it to snap back to north-up, and tap it again to have the map turn with your phone so the way you are facing is up.'),
@@ -1064,7 +1090,7 @@
       ui.tab = b.dataset.tab; endPlacing(); go('list');
       if (isMobile() && ui.sheet === 'peek') setSheet('half');
     });
-    $('fab').addEventListener('click', () => { endPlacing(); if (isMobile() && ui.sheet === 'peek') setSheet('half'); go('add'); });
+    $('fab').addEventListener('click', () => { endPlacing(); clearPending(); if (isMobile() && ui.sheet === 'peek') setSheet('half'); go('add'); });
     $('scrub-range').addEventListener('input', (e) => setScrub(+e.target.value, true));
     $('scrub-now').addEventListener('click', () => setScrub(data.nowMin));
     $('status').addEventListener('click', () => { if (!data.loading) refresh(true); });
@@ -1285,6 +1311,7 @@
     M.init('map', {
       view: settings().view, basemap: settings().basemap,
       onTap: (ll) => { if (ui.measure) addMeasurePoint(ll.lat, ll.lng); else if (ui.placing) placeAt(ll.lat, ll.lng); },
+      onHold: (ll) => holdAt(ll.lat, ll.lng),
       onSelectStand: (id) => { if (ui.measure) { const s = S.getStand(id); if (s) addMeasurePoint(s.lat, s.lng); } else if (!ui.placing) selectStand(id); },
       onSelectMark: (id) => { if (ui.measure) { const m = S.getMark(id); if (m) addMeasurePoint(m.lat, m.lng); } else if (!ui.placing) selectMark(id); },
       onMoveStand: (id, lat, lng) => { S.updateStand(id, { lat: lat, lng: lng }); refresh(); },

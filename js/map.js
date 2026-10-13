@@ -61,6 +61,8 @@
     ['cone', 'arrows', 'marks', 'stands', 'measure'].forEach(function (k) { g[k] = L.layerGroup().addTo(map); });
     setBasemap(opts.basemap || 'imagery');
     map.on('click', function (e) { if (opts.onTap) opts.onTap(e.latlng); });
+    // press and hold on a phone (Leaflet turns the hold into this event), right-click on a computer
+    map.on('contextmenu', function (e) { if (opts.onHold) opts.onHold(e.latlng); });
     map.on('moveend', function () { if (opts.onMoveEnd) opts.onMoveEnd(map.getCenter(), map.getZoom()); });
     return map;
   }
@@ -298,6 +300,16 @@
   }
   function center() { var c = map.getCenter(); return { lat: c.lat, lng: c.lng }; }
   function setPlacing(on) { map.getContainer().classList.toggle('placing', !!on); }
+  // A temporary pin for the spot you pressed and held, shown while you choose what goes there.
+  var pendingPin = null;
+  function setPending(p) {
+    if (pendingPin) { map.removeLayer(pendingPin); pendingPin = null; }
+    if (!p) return;
+    pendingPin = L.marker([p.lat, p.lng], {
+      icon: L.divIcon({ className: 'pend-wrap', html: '<div class="pend"></div>', iconSize: [34, 34], iconAnchor: [17, 17] }),
+      interactive: false, keyboard: false, zIndexOffset: 1800
+    }).addTo(map);
+  }
   function invalidate() { if (map) map.invalidateSize(); }
   function panByPixels(dx, dy) { map.panBy([dx, dy], { animate: true }); }
 
@@ -423,6 +435,6 @@
   SC.map = {
     BASES: BASES, init: init, setBasemap: setBasemap, render: render, renderField: renderField, bounds: bounds, flyTo: flyTo, fitPoints: fitPoints,
     center: center, setPlacing: setPlacing, invalidate: invalidate, locate: locate, watch: watch, unwatch: unwatch, watching: watching, cacheArea: cacheArea,
-    panByPixels: panByPixels, renderMeasure: renderMeasure, setOverlay: setOverlay, OVER: OVER, get leaflet() { return map; }, bearing: bearing, setBearing: setBearing, setFollow: setFollow, setHeading: setHeading, get following() { return follow; }, get lastFix() { return lastFix; }, get canRotate() { return !!map.setBearing; }, get basemap() { return baseKey; }, get zoom() { return map.getZoom(); }
+    panByPixels: panByPixels, setPending: setPending, renderMeasure: renderMeasure, setOverlay: setOverlay, OVER: OVER, get leaflet() { return map; }, bearing: bearing, setBearing: setBearing, setFollow: setFollow, setHeading: setHeading, get following() { return follow; }, get lastFix() { return lastFix; }, get canRotate() { return !!map.setBearing; }, get basemap() { return baseKey; }, get zoom() { return map.getZoom(); }
   };
 })();

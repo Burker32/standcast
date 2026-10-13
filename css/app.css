@@ -485,6 +485,11 @@ textarea { resize: vertical; min-height: 96px; line-height: 1.4; }
 .mb-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .mb-actions .btn { padding: 0 4px; white-space: nowrap; font-size: 13px; }
 .ms-wrap { background: none; border: 0; }
+/* the spot you pressed and held: a pulsing target until you choose what goes there */
+.pend-wrap { background: none; border: 0; pointer-events: none; }
+.pend { width: 34px; height: 34px; border-radius: 50%; border: 3px solid #fff; background: radial-gradient(circle, #ffd23f 0 5px, rgba(255, 210, 63, .28) 6px); box-shadow: 0 0 0 2px #1a1a1a, 0 2px 8px rgba(0, 0, 0, .6); animation: pend 1.2s ease-in-out infinite; }
+@keyframes pend { 50% { transform: scale(1.25); } }
+@media (prefers-reduced-motion: reduce) { .pend { animation: none; } }
 .ms-pt { width: 22px; height: 22px; border-radius: 50%; background: #ffd23f; border: 3px solid #1a1a1a; box-shadow: 0 1px 6px rgba(0,0,0,.6); }
 .ms-pt.first { background: #fff; }
 .ms-leg {
