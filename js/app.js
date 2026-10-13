@@ -114,7 +114,7 @@
   function needsTerrain(s) {
     if (data.terrainBusy[s.id]) return false;
     if (data.terrainFailed[s.id] && Date.now() - data.terrainFailed[s.id] < 5 * 60000) return false;
-    return !s.terrain || !s.terrain.src || distM(s.terrain.lat, s.terrain.lng, s.lat, s.lng) > 40;   // no src = old 90 m reading: redo with lidar
+    return !s.terrain || s.terrain.src !== 'lidar' || distM(s.terrain.lat, s.terrain.lng, s.lat, s.lng) > 40;   // no src = old 90 m reading: redo with lidar
   }
   function ensureTerrain() {
     const todo = stands().filter(needsTerrain);
@@ -1184,7 +1184,7 @@
       h('p', { class: 'line' }, 'For each stand, StandCast looks at the wind through your hunt window (the first hours after sunrise or the last hours before sunset). It adds an estimate of slope thermals to the forecast wind, then checks the result against the winds you marked good and bad for that stand.'),
       h('p', { class: 'line' }, 'The score is mostly wind fit, plus how steady the wind is, how fast it is moving, rain chances and how recently you hunted the stand. The scent cone on the map shows where your scent travels at the time you pick on the slider.')));
     root.appendChild(h('div', { class: 'block' }, h('h3', null, 'What to trust'),
-      h('p', { class: 'line' }, 'Wind comes from a weather model on a grid several miles wide. It does not see every hollow and ridge, so local swirl can differ. Thermals are an estimate from the slope, the sun and cloud cover, and they matter most in light wind on a real hillside.'),
+      h('p', { class: 'line' }, 'Wind comes from the National Weather Service forecast, on a grid about a mile and a half wide. It does not see every hollow and ridge, so local swirl can differ. Thermals are an estimate from the slope, the sun and cloud cover, and they matter most in light wind on a real hillside.'),
       h('p', { class: 'line' }, 'Use it to choose between stands and to spot a bad wind swing coming. Your own read of the woods comes first.')));
     root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Reading the thermals'),
       h('p', { class: 'line' }, 'Wind and thermals are drawn apart. The long pale streaks are the wind near the ground, slowed by the trees. The orange and purple glow marks slopes where thermals are working, and the bright beads crawling across it show which way: orange climbing uphill, purple draining downhill. Beads go faint where the wind is strong enough to overpower them. Pink spinning rings are swirl, where the two fight. The green puffs leaving each stand are your scent riding all of it together.'),
@@ -1231,7 +1231,7 @@
       h('p', { class: 'line' }, 'Deletes every stand, mark and photo on this device.'),
       confirmTwice('Erase everything', () => { S.clearAll(); ui.selStand = ui.selMark = null; data.fc = {}; toast('All data erased'); recompute(); go('list', { tab: 'stands' }); })));
     root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Data and credits'),
-      h('p', { class: 'fine' }, 'Forecast: Open-Meteo (open-meteo.com), national weather model data. Ground elevation: USGS 3D Elevation Program (lidar), with the Copernicus 90 m model as a backup. Maps: U.S. Geological Survey, The National Map; Missouri leaf-off imagery: MSDIS. Wisconsin leaf-off imagery: Wisconsin DNR and the Wisconsin Regional Orthophoto Consortium. Place names and roads: USGS. Crops: USDA NASS Cropland Data Layer. Public land: USGS PAD-US. Mapping library: Leaflet with leaflet-rotate.')));
+      h('p', { class: 'fine' }, 'Forecast: U.S. National Weather Service (weather.gov). Sunrise, sunset and sunshine are worked out in the app from the sun\'s position and the forecast cloud. Ground elevation: USGS 3D Elevation Program (lidar). Maps: U.S. Geological Survey, The National Map; Missouri leaf-off imagery: MSDIS. Wisconsin leaf-off imagery: Wisconsin DNR and the Wisconsin Regional Orthophoto Consortium. Place names and roads: USGS. Crops: USDA NASS Cropland Data Layer. Public land: USGS PAD-US. Mapping library: Leaflet with leaflet-rotate.')));
     return root;
   }
 

@@ -655,7 +655,8 @@
     }
     return out;
   }
-  // Open-Meteo hourly block -> compact object the rest of the engine uses.
+  // An hourly block in the Open-Meteo layout -> compact object the rest of the engine uses.
+  // The app no longer loads from Open-Meteo (see forecastFromNws); this stays for the tests, which use this layout.
   function normalizeForecast(raw) {
     var h = raw.hourly, d = raw.daily;
     return {
@@ -673,6 +674,91 @@
       })
     };
   }
+  /* ---------- National Weather Service forecast ----------
+   * The NWS grid forecast (api.weather.gov, U.S. government, free for any use) gives each quantity as a list of
+   * time spans: { validTime: "2026-10-13T15:00:00+00:00/PT2H", value }. These helpers turn that into the same
+   * hour-by-hour object normalizeForecast() makes, starting at local midnight today and running 4 days.
+   * NWS does not forecast sunshine or sun times, so both are worked out here from the sun's position and the
+   * forecast cloud cover. */
+  // Sunrise and sunset for a local date ('YYYY-MM-DD'), as naive local minutes like everything else here.
+  function sunTimes(date, lat, lng, utcOffsetSec) {
+    var day0 = parseLocalMin(date + 'T00:00');
+    function up(t) { return solarPosition(t * 60000 - utcOffsetSec * 1000, lat, lng).elev > -0.833; }   // the sun's top edge on the horizon
+    function cross(from, to, wantUp) {
+      for (var t = from; t < to; t += 5) {
+        if (up(t) !== wantUp && up(t + 5) === wantUp) {
+          var a = t, b = t + 5;
+          for (var k = 0; k < 6; k++) { var m = (a + b) / 2; if (up(m) === wantUp) b = m; else a = m; }
+          return Math.round(b);
+        }
+      }
+      return null;
+    }
+    var rise = cross(day0, day0 + 1440, true);
+    var set = cross(rise == null ? day0 : rise, day0 + 1440 + 180, false);
+    // far north in midsummer or midwinter there may be no rise or set: fall back to 6 and 6
+    return { date: date, sunrise: rise == null ? day0 + 360 : rise, sunset: set == null ? day0 + 1080 : set };
+  }
+  // Sunshine reaching flat ground (W/m2): clear-sky value from the sun's height (Haurwitz), cut down by cloud (Kasten and Czeplak).
+  function estimateShortwave(sunElevDeg, cloudPct) {
+    if (!(sunElevDeg > 0)) return 0;
+    var s = Math.sin(sunElevDeg * DEG), c = clamp(cloudPct, 0, 100) / 100;
+    return 1098 * s * Math.exp(-0.057 / s) * (1 - 0.75 * Math.pow(c, 3.4));
+  }
+  function nwsSpan(validTime) {
+    var m = /^([^\/]+)\/P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?$/.exec(validTime || '');
+    if (!m) return null;
+    var start = Date.parse(m[1]);
+    if (isNaN(start)) return null;
+    return { start: start, end: start + Math.max(1, (+m[2] || 0) * 24 + (+m[3] || 0) + (+m[4] || 0) / 60) * 3600000 };
+  }
+  // One NWS quantity spread over our hours. `hours` are the UTC start times (ms) of each hour; gaps come back null.
+  function nwsHourly(prop, hours, convert) {
+    var out = hours.map(function () { return null; });
+    if (!prop || !Array.isArray(prop.values)) return out;
+    prop.values.forEach(function (v) {
+      var sp = nwsSpan(v.validTime);
+      if (!sp || typeof v.value !== 'number') return;
+      for (var i = 0; i < hours.length; i++) if (hours[i] >= sp.start && hours[i] < sp.end) out[i] = convert ? convert(v.value) : v.value;
+    });
+    return out;
+  }
+  function nwsSpeedToMph(uom) {
+    return /m_s-1/.test(uom || '') ? function (v) { return v * 2.236936; } : /kn|kt/.test(uom || '') ? function (v) { return v * 1.150779; }
+      : /mi_h-1|mph/.test(uom || '') ? null : function (v) { return v * 0.6213712; };   // km/h is what NWS sends
+  }
+  // Hours before the forecast starts take its first value, so the whole day reads sensibly.
+  function fillEdges(a, fallback) {
+    var first = null;
+    for (var i = 0; i < a.length; i++) if (a[i] != null) { first = a[i]; break; }
+    var leading = true;
+    return fillNulls(a.map(function (v) { if (v != null) leading = false; return v == null && leading ? first : v; }), first == null ? fallback : first);
+  }
+  // props: the `properties` of an NWS gridpoint reply. utcOffsetSec: the local clock's offset at the spot (CDT = -18000).
+  function forecastFromNws(props, utcOffsetSec, lat, lng, nowMs) {
+    var HOURS = 96, off = utcOffsetSec | 0;
+    var day0 = Math.floor(((nowMs == null ? Date.now() : nowMs) / 1000 + off) / 86400) * 1440;   // local midnight today, in naive local minutes
+    var t = [], utc = [];
+    for (var i = 0; i < HOURS; i++) { t.push(day0 + i * 60); utc.push((day0 + i * 60) * 60000 - off * 1000); }
+    var speedRaw = nwsHourly(props.windSpeed, utc, nwsSpeedToMph(props.windSpeed && props.windSpeed.uom));
+    if (speedRaw.every(function (v) { return v == null; })) throw new Error('The forecast has no wind for this spot yet.');
+    var toF = /degF/.test((props.temperature && props.temperature.uom) || '') ? null : function (c) { return c * 9 / 5 + 32; };
+    var cloud = fillEdges(nwsHourly(props.skyCover, utc), 50);
+    var daily = [];
+    for (var d = 0; d < HOURS / 24; d++) daily.push(sunTimes(dateKey(day0 + d * 1440), lat, lng, off));
+    return {
+      utcOffsetSec: off, t: t, source: 'nws',
+      temp: fillEdges(nwsHourly(props.temperature, utc, toF), 60),
+      precip: fillEdges(nwsHourly(props.probabilityOfPrecipitation, utc), 0),
+      cloud: cloud,
+      speed: fillEdges(speedRaw, 0),
+      dir: fillEdges(nwsHourly(props.windDirection, utc), 0),
+      gust: fillEdges(nwsHourly(props.windGust, utc, nwsSpeedToMph(props.windGust && props.windGust.uom)), 0),
+      sw: utc.map(function (ms, k) { return estimateShortwave(solarPosition(ms + 1800000, lat, lng).elev, cloud[k]); }),   // sun at the middle of the hour
+      daily: daily
+    };
+  }
+
   function sampleForecast(fc, tMin) {
     var t = fc.t, n = t.length, i;
     if (tMin <= t[0]) i = 0;
@@ -930,6 +1016,7 @@
     findBenches: findBenches, demTiles: demTiles, BENCH: BENCH, findSpots: findSpots, SPOTS: SPOTS,
     thermal: thermal, swirl: swirl, swirlSpots: swirlSpots, heatIndex: heatIndex, thermalWords: thermalWords, thermalSwitches: thermalSwitches,
     normalizeForecast: normalizeForecast, sampleForecast: sampleForecast, nowMinFor: nowMinFor,
+    forecastFromNws: forecastFromNws, sunTimes: sunTimes, estimateShortwave: estimateShortwave,
     windRating: windRating, isConfigured: isConfigured, ratingClass: ratingClass,
     stateAt: stateAt,
     sitWindowFor: sitWindowFor, listSits: listSits, windowForStand: windowForStand,

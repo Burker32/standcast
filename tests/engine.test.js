@@ -436,3 +436,56 @@ test('funnels: a gentle strip pinched between steep ground, or between a bluff a
   assert.equal(E.findSpots(ground(R, C, (i, j) => 300 + 0.03 * i + 0.02 * j), R, C, d).funnels.length, 0);
   assert.equal(E.findSpots(ground(R, C, (i) => 300 - i * d * steep), R, C, d).funnels.length, 0);
 });
+// ---- National Weather Service forecast ----
+test('sun times: sunrise and sunset near Stockton match the almanac', () => {
+  const s = E.sunTimes('2026-10-13', 37.70, -93.80, -18000);                     // Central Daylight Time
+  const clock = (m) => m - E.parseLocalMin('2026-10-13T00:00');
+  assert.ok(Math.abs(clock(s.sunrise) - (7 * 60 + 21)) <= 4, 'sunrise about 7:21 AM, got ' + E.fmtClock(s.sunrise));
+  assert.ok(Math.abs(clock(s.sunset) - (18 * 60 + 40)) <= 4, 'sunset about 6:40 PM, got ' + E.fmtClock(s.sunset));
+  const w = E.sunTimes('2026-12-21', 44.6, -89.9, -21600);                       // midwinter Wisconsin: a short day
+  assert.ok(w.sunset - w.sunrise > 8 * 60 && w.sunset - w.sunrise < 9.5 * 60, 'about 9 hours of daylight');
+});
+test('sunshine estimate: none at night, strong at a clear noon, cut by heavy cloud', () => {
+  assert.equal(E.estimateShortwave(-5, 0), 0);
+  const clear = E.estimateShortwave(45, 0), overcast = E.estimateShortwave(45, 100);
+  assert.ok(clear > 650 && clear < 800, 'clear sky at 45 degrees: ' + clear);
+  assert.ok(overcast > 0.2 * clear && overcast < 0.3 * clear, 'overcast keeps about a quarter');
+  assert.ok(E.estimateShortwave(10, 0) < E.estimateShortwave(40, 0));
+});
+test('NWS forecast: time spans become hourly values in mph, degrees F and local time', () => {
+  const now = Date.UTC(2026, 9, 13, 19, 30);                                     // 2:30 PM CDT on Oct 13
+  const span = (iso, dur, value) => ({ validTime: iso + '/' + dur, value });
+  const props = {
+    temperature: { uom: 'wmoUnit:degC', values: [span('2026-10-13T15:00:00+00:00', 'PT2H', 20), span('2026-10-13T17:00:00+00:00', 'P1DT6H', 10)] },
+    windSpeed: { uom: 'wmoUnit:km_h-1', values: [span('2026-10-13T15:00:00+00:00', 'PT4H', 16.0934), span('2026-10-13T19:00:00+00:00', 'P2D', 8.0467)] },
+    windDirection: { uom: 'wmoUnit:degree_(angle)', values: [span('2026-10-13T15:00:00+00:00', 'P3D', 200)] },
+    windGust: { uom: 'wmoUnit:km_h-1', values: [span('2026-10-13T15:00:00+00:00', 'P3D', 32.1868)] },
+    skyCover: { uom: 'wmoUnit:percent', values: [span('2026-10-13T15:00:00+00:00', 'P3D', 10)] },
+    probabilityOfPrecipitation: { uom: 'wmoUnit:percent', values: [span('2026-10-13T15:00:00+00:00', 'PT6H', 5), span('2026-10-13T21:00:00+00:00', 'P3D', 60)] }
+  };
+  const fc = E.forecastFromNws(props, -18000, 37.70, -93.80, now);
+  assert.equal(fc.utcOffsetSec, -18000);
+  assert.equal(fc.t.length, 96);
+  assert.equal(fc.t[0], E.parseLocalMin('2026-10-13T00:00'));                    // starts at local midnight
+  const at = (hh) => fc.t.indexOf(E.parseLocalMin('2026-10-13T' + hh + ':00'));
+  assert.ok(Math.abs(fc.speed[at('11')] - 10) < 0.01, '16.09 km/h is 10 mph');   // 16:00 UTC = 11 AM local
+  assert.ok(Math.abs(fc.speed[at('15')] - 5) < 0.01, 'the later span takes over');
+  assert.ok(Math.abs(fc.speed[at('03')] - 10) < 0.01, 'hours before the forecast starts take its first value');
+  assert.ok(Math.abs(fc.temp[at('10')] - 68) < 0.01, '20 C is 68 F');
+  assert.ok(Math.abs(fc.temp[at('13')] - 50) < 0.01);
+  assert.equal(fc.dir[at('12')], 200);
+  assert.ok(Math.abs(fc.gust[at('12')] - 20) < 0.01);
+  assert.equal(fc.precip[at('12')], 5); assert.equal(fc.precip[at('17')], 60);
+  assert.ok(fc.sw[at('13')] > 400, 'sun at midday: ' + fc.sw[at('13')]);
+  assert.equal(fc.sw[at('02')], 0);
+  assert.equal(fc.daily.length, 4);
+  assert.equal(fc.daily[0].date, '2026-10-13');
+  assert.ok(fc.daily[0].sunrise < fc.daily[0].sunset && fc.daily[1].sunrise > fc.daily[0].sunset);
+  // the rest of the engine runs on it unchanged
+  const stand = { lat: 37.70, lng: -93.80, winds: { S: 'good', SW: 'good' }, terrain: { slopeDeg: 8, aspectDeg: 90 } };
+  const sits = E.listSits(fc, E.nowMinFor(fc, now), 6);
+  assert.ok(sits.length >= 4 && sits[0].label === 'Tonight', 'first sit is tonight: ' + sits.map((s) => s.label).join(', '));
+  const ev = E.evaluateSit(stand, fc, E.windowForStand(fc, sits[0], E.nowMinFor(fc, now)), E.nowMinFor(fc, now));
+  assert.ok(ev.score > 0 && ev.score <= 100 && ev.reasons.length > 0);
+  assert.throws(() => E.forecastFromNws({ windSpeed: { values: [] } }, -18000, 37.7, -93.8, now), /no wind/);
+});

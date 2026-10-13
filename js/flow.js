@@ -5,7 +5,7 @@
  *            bright where the thermals beat the wind and faint where the wind overpowers them.
  *   swirl    turning pink rings where the two fight
  *   scent    green puffs from each stand riding the combined air (wind + thermals + swirl)
- * Everything here is an estimate drawn from a weather model and 90 m terrain. */
+ * Everything here is an estimate drawn from the weather forecast and lidar terrain. */
 (function () {
   'use strict';
   var SC = window.SC = window.SC || {};

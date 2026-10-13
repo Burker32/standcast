@@ -26,8 +26,8 @@ Leaflet and leaflet-rotate ship in `vendor/`, so the map library loads with no s
 Covers the wind/thermal/scoring engine (sun position, terrain, thermals, ranking, sit windows, scent cone geometry) and the EXIF GPS reader.
 
 ## How the model works (js/engine.js)
-- Wind: Open-Meteo hourly forecast (10 m wind, gusts, cloud, solar radiation, rain chance), interpolated as vectors.
-- Terrain: elevation at the stand plus four points 150 m away (Copernicus 90 m model) gives slope and the direction it faces.
+- Wind: U.S. National Weather Service grid forecast (wind, gusts, cloud, rain chance), interpolated as vectors. Sunshine and sun times are worked out from the sun's position.
+- Terrain: elevation at the stand plus four points 60 m away (USGS 3DEP lidar) gives slope and the direction it faces.
 - Thermals: the slope's sun exposure (from solar position and radiation) decides rising versus sinking air. Strength scales with steepness and fades as the wind picks up. Added to the wind as a small drift vector.
 - Score: wind fit 60%, steadiness 15%, wind speed 15%, rain 10%, minus a penalty for recently hunted stands.
 - All numbers are estimates. Labels in the UI say so.
@@ -38,7 +38,7 @@ Covers the wind/thermal/scoring engine (sun position, terrain, thermals, ranking
     js/engine.js     pure model, no DOM (tested)
     js/exif.js       JPEG GPS reader (tested)
     js/store.js      local-first storage (localStorage + IndexedDB for photos)
-    js/weather.js    Open-Meteo forecast and elevation, with cache
+    js/weather.js    National Weather Service forecast and USGS elevation, with cache
     js/map.js        Leaflet map, markers, cones, offline tiles
     js/app.js        state and panel UI
     sw.js            offline support

@@ -4,7 +4,7 @@
  *  - Map library (Leaflet, leaflet-rotate): shipped with the app in vendor/, cached on install.
  *  - Fonts from CDNs: cached the first time they load.
  *  - Forecast and elevation calls are never cached here (the app keeps its own copy). */
-const VERSION = 'v39';
+const VERSION = 'v40';
 const SHELL = 'sc-shell-' + VERSION;
 const TILES = 'sc-tiles-v1';
 const LIBS = 'sc-libs-' + VERSION;
@@ -71,7 +71,7 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  if (url.hostname === 'api.open-meteo.com') return; // handled by the app
+  if (url.hostname === 'api.weather.gov') return; // forecast: handled by the app, which keeps its own copy
   if (url.hostname === 'nassgeodata.gmu.edu') {
     e.respondWith(caches.open(TILES).then(async (c) => {
       const hit = await c.match(req.url);

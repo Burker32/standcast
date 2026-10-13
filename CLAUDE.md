@@ -11,7 +11,7 @@ A bowhunting app that answers "which stand tonight?" It models wind, thermals, s
   2. Bump `VERSION` in `sw.js`.
   3. Run `npm test`, and `node --check` on each edited JS file.
   4. Commit and push to `main`. GitHub Pages rebuilds the site by itself, usually within a minute or two.
-- **Every deploy must bump `VERSION` in `sw.js`** (currently `'v39'`). The service worker serves cache-first, so phones keep the old app until the version changes. After a deploy, the owner closes and reopens the app once.
+- **Every deploy must bump `VERSION` in `sw.js`** (currently `'v40'`). The service worker serves cache-first, so phones keep the old app until the version changes. After a deploy, the owner closes and reopens the app once.
 - The app is served from the `/standcast/` subfolder, so every path in `index.html`, `manifest.webmanifest` and `sw.js` must stay relative (no leading `/`).
 - The repo is public. `CLAUDE.local.md` and zip files are kept out by `.gitignore`. Check `git status` before committing so nothing private goes up.
 - The empty `.nojekyll` file tells GitHub Pages to serve the files as they are.
@@ -33,8 +33,8 @@ Scripts load in this order in `index.html`: engine, exif, marktypes, store, weat
   - `findSpots()`: saddles (walk a circle round a spot and the ground goes up, down, up, down) and funnels (walkable ground 18 to 55 m wide pinched between steep slopes or dead-level lidar water). Returns only the strongest few, spaced apart; thresholds in `SPOTS`. Uses zoom-15 elevation squares. `map.js` `renderSpots()` draws them as small badges and `app.js` `showSpot()` explains a tapped one.
   - `distanceM`/`fmtYards`: distances for the measure tool.
 - **`js/weather.js`:**
-  - Open-Meteo forecast, with retry and `forecastBusy` gating.
-  - Ground elevation comes from USGS 3DEP 1 m lidar through an ImageServer `getSamples` POST. It falls back to Open-Meteo elevation. Cache key is `standcast.elev.v2`.
+  - Forecast from the U.S. National Weather Service (`api.weather.gov`): `/points/lat,lng` gives the grid square (remembered in `standcast.nwspoint.v1`), then the gridpoint data, turned into the engine's hourly object by `engine.forecastFromNws()`. NWS has no sunshine or sun times, so `estimateShortwave()` and `sunTimes()` work them out. U.S. only. Retry and `forecastBusy` gating as before. Open-Meteo was dropped in v40 because its free service is non-commercial only.
+  - Ground elevation comes from USGS 3DEP 1 m lidar through an ImageServer `getSamples` POST. There is no fallback source. Cache key is `standcast.elev.v2`.
 - **Tile speed notes (measured Oct 2026):** the Missouri leaf-off ImageServer answers a 256 or 320 px export in about 0.1 s but takes about 1 s for 512 px, so `exportUrl()` asks for 320 on high-density screens. USGS summer tiles take 0.3 to 0.7 s each and cannot be sped up from our side. Base layers use `updateWhenIdle: false` and `keepBuffer: 3`. In `sw.js`, `trimTiles()` only lists the tile cache once every 60 saves.
 - **`js/map.js`:** Leaflet 1.9.4 plus leaflet-rotate 0.2.8, shipped in `vendor/` so the map works with no signal (CDN copies are only a fallback). Any new file in `vendor/` must be added to `FILES` in `sw.js`.
   - Basemaps:
@@ -84,7 +84,7 @@ Scripts load in this order in `index.html`: engine, exif, marktypes, store, weat
 
 ## Data sources
 
-All are free and need no API key: USGS National Map basemaps, MSDIS (Missouri), USGS 3DEP elevation, Open-Meteo, PAD-US via Esri, and USDA NASS CropScape. Keep credits for these in the app's credits and guide text.
+All are free and need no API key: USGS National Map basemaps, MSDIS (Missouri), USGS 3DEP elevation, the National Weather Service, the Census Bureau (town populations, address search), Wisconsin DNR imagery, PAD-US via Esri, and USDA NASS CropScape. Keep credits for these in the app's credits and guide text.
 
 ## Conventions
 
@@ -93,3 +93,8 @@ All are free and need no API key: USGS National Map basemaps, MSDIS (Missouri), 
 - Be honest in the UI that wind, thermals and swirls are modeled estimates, and that PAD-US lines are not legal surveys.
 - Feedback comes from field use on a phone, so check changes at phone width and with the map rotated.
 - Never put API keys or other secrets in this repo: it is public.
+
+## Licences
+
+- **leaflet-rotate 0.2.8 is GPL-3.0** (confirmed from the npm registry and the repo's LICENSE, Oct 2026). Shipping it inside a closed-source paid app is a problem. It has not been replaced: the options are to publish the client code under the GPL, get a separate licence from the author, drop map rotation, or move the map to a library with rotation built in (MapLibre GL JS, BSD). The owner has to choose. Do not add other GPL code.
+- Leaflet is BSD-2-Clause. Government data sources are public domain. Open-Meteo is no longer used.

@@ -1,15 +1,20 @@
-/* Forecast and terrain loading. Wind is modeled data from Open-Meteo (no key needed),
- * cached locally so the last forecast still shows with no signal. */
+/* Forecast and terrain loading. The forecast is the U.S. National Weather Service grid forecast
+ * (api.weather.gov): government data, free for any use including a paid app, no key. It covers the
+ * United States only. Cached locally so the last forecast still shows with no signal.
+ * (Until v40 this used Open-Meteo, whose free service is for non-commercial use only.) */
 (function () {
   'use strict';
   var SC = window.SC = window.SC || {};
   var E = SC.engine;
-  var KEY = 'standcast.forecast.v1';
+  var KEY = 'standcast.forecast.v2', PKEY = 'standcast.nwspoint.v1';
   var TTL = 20 * 60 * 1000;
-  var HOURLY = 'temperature_2m,precipitation_probability,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,shortwave_radiation';
+  var NWS = 'https://api.weather.gov';
   var cache = {}; // "37.66,-93.76" -> { fc, at }
+  var points = {}; // "37.66,-93.76" -> { grid: forecast grid URL, tz: 'America/Chicago' }. A spot's grid square never changes, so this is kept.
 
   try { cache = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { cache = {}; }
+  try { points = JSON.parse(localStorage.getItem(PKEY) || '{}') || {}; } catch (e) { points = {}; }
+  try { localStorage.removeItem('standcast.forecast.v1'); } catch (e) { /* old Open-Meteo copy */ }
 
   function persist() {
     try {
@@ -33,6 +38,17 @@
     }, function (e) { clearTimeout(timer); throw e; });
   }
 
+  // Seconds the local clock at a place is ahead of UTC (Central Daylight Time is -18000), from its time zone name.
+  function tzOffsetSec(tz, ms) {
+    ms = Math.floor(ms / 1000) * 1000;   // whole seconds, so the answer is exact
+    try {
+      var parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date(ms));
+      var v = {};
+      parts.forEach(function (p) { v[p.type] = +p.value; });
+      return Math.round((Date.UTC(v.year, v.month - 1, v.day, v.hour % 24, v.minute, v.second) - ms) / 1000);
+    } catch (e) { return -new Date(ms).getTimezoneOffset() * 60; }   // no zone name: assume the phone is in the same zone as the stand
+  }
+
   // Returns { byStand: {id: fc|null}, at: oldest fetch time, stale: bool, error: string|null }
   function loadFor(stands, force) {
     var p = loadFor_(stands, force);
@@ -47,27 +63,37 @@
       var c = cache[k];
       if (force || !c || Date.now() - c.at > TTL) need[k] = wanted[k];
     });
-    var keys = Object.keys(need), chunks = [];
-    for (var i = 0; i < keys.length; i += 20) chunks.push(keys.slice(i, i + 20));
-    var error = null;
-
-    return chunks.reduce(function (chain, chunk) {
-      return chain.then(function () {
-        var lats = chunk.map(function (k) { return need[k][0].toFixed(2); }).join(',');
-        var lngs = chunk.map(function (k) { return need[k][1].toFixed(2); }).join(',');
-        var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lats + '&longitude=' + lngs +
-          '&hourly=' + HOURLY + '&daily=sunrise,sunset&wind_speed_unit=mph&temperature_unit=fahrenheit' +
-          '&timezone=auto&forecast_days=4';
-        // one quiet retry: on a slow phone connection the first try can stall
-        return getJson(url, 20000).catch(function () { return getJson(url, 25000); }).then(function (j) {
-          var list = Array.isArray(j) ? j : [j];
-          list.forEach(function (raw, idx) {
-            if (!raw || !raw.hourly) return;
-            cache[chunk[idx]] = { fc: E.normalizeForecast(raw), at: Date.now() };
-          });
-        }).catch(function (e) { error = e && e.name === 'AbortError' ? 'The forecast server took too long.' : 'Could not reach the forecast server.'; });
+    var keys = Object.keys(need), error = null, grids = {};
+    // one quiet retry: on a slow phone connection the first try can stall, and NWS now and then answers "try again"
+    function twice(url) { return getJson(url, 20000).catch(function (e) { if (e && e.outside) throw e; return getJson(url, 25000); }); }
+    // Step 1: which forecast grid square is this spot in (asked once per spot, then remembered).
+    function pointFor(k) {
+      if (points[k] && points[k].grid) return Promise.resolve(points[k]);
+      return getJson(NWS + '/points/' + need[k][0].toFixed(4) + ',' + need[k][1].toFixed(4), 20000).catch(function (e) {
+        if (e && /HTTP 404/.test(e.message)) { var o = new Error('outside'); o.outside = true; throw o; }
+        return getJson(NWS + '/points/' + need[k][0].toFixed(4) + ',' + need[k][1].toFixed(4), 25000);
+      }).then(function (j) {
+        var p = j && j.properties;
+        if (!p || !p.forecastGridData) throw new Error('no grid');
+        points[k] = { grid: p.forecastGridData, tz: p.timeZone || '' };
+        try { localStorage.setItem(PKEY, JSON.stringify(points)); } catch (e2) { /* memory only */ }
+        return points[k];
       });
-    }, Promise.resolve()).then(function () {
+    }
+    // Step 2: that square's forecast. Stands in the same 1.5 mile square share one request.
+    function gridFor(url) { return grids[url] || (grids[url] = twice(url)); }
+
+    return Promise.all(keys.map(function (k) {
+      return pointFor(k).then(function (pt) {
+        return gridFor(pt.grid).then(function (j) {
+          if (!j || !j.properties) throw new Error('no forecast');
+          var now = Date.now();
+          cache[k] = { fc: E.forecastFromNws(j.properties, tzOffsetSec(pt.tz, now), need[k][0], need[k][1], now), at: now };
+        });
+      }).catch(function (e) {
+        error = e && e.outside ? 'The forecast covers the United States only.' : e && e.name === 'AbortError' ? 'The forecast server took too long.' : 'Could not reach the forecast server.';
+      });
+    })).then(function () {
       if (keys.length) persist();
       var byStand = {}, oldest = Infinity, stale = false, missing = false;
       stands.forEach(function (s) {
@@ -81,8 +107,8 @@
   }
 
   /* ---------- ground elevation ----------
-   * First choice: USGS 3DEP bare-earth elevation, from lidar at 1 m where flown (most of Missouri).
-   * Fallback: Open-Meteo's 90 m terrain model. Both free, no key. */
+   * USGS 3DEP bare-earth elevation, from lidar at 1 m where flown (most of Missouri) and the national
+   * 10 m model elsewhere. Government data, free, no key. */
   var DEP = 'https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/getSamples';
   function dep3(pts) {   // pts: [[lat,lng]] -> Promise<[elev|null]>
     var body = 'geometry=' + encodeURIComponent(JSON.stringify({ points: pts.map(function (p) { return [+p[1].toFixed(6), +p[0].toFixed(6)]; }), spatialReference: { wkid: 4326 } })) +
@@ -98,29 +124,15 @@
         return out;
       }, function (e) { clearTimeout(t); throw e; });
   }
-  function openMeteoElev(pts) {
-    var url = 'https://api.open-meteo.com/v1/elevation?latitude=' + pts.map(function (p) { return p[0].toFixed(6); }).join(',') +
-      '&longitude=' + pts.map(function (p) { return p[1].toFixed(6); }).join(',');
-    return getJson(url, 15000).then(function (j) {
-      var z = j && j.elevation;
-      if (!z || z.length !== pts.length) throw new Error('No elevation data');
-      return z.map(function (v) { return typeof v === 'number' ? v : null; });
-    });
-  }
-
-  // Elevation at the stand plus four points around it -> slope and which way it faces.
-  // With lidar the probes sit 60 m out (the hillside the stand is on); with 90 m data they need 150 m.
+  // Elevation at the stand plus four points 60 m around it (the hillside the stand is on) -> slope and which way it faces.
   function fetchTerrain(lat, lng) {
-    function build(z, spacing, src) {
+    function build(z) {
       if (!z || z.length < 5 || z.some(function (v) { return typeof v !== 'number'; })) throw new Error('No elevation data');
-      var t = E.terrainFromSamples(z[1], z[2], z[3], z[4], spacing);
-      return { slopeDeg: t.slopeDeg, aspectDeg: t.aspectDeg, elevM: z[0], lat: lat, lng: lng, at: Date.now(), src: src };
+      var t = E.terrainFromSamples(z[1], z[2], z[3], z[4], 60);
+      return { slopeDeg: t.slopeDeg, aspectDeg: t.aspectDeg, elevM: z[0], lat: lat, lng: lng, at: Date.now(), src: 'lidar' };
     }
     var near = E.terrainProbePoints(lat, lng, 60);
-    return dep3(near).then(function (z) { return build(z, 60, 'lidar'); }).catch(function () {
-      var far = E.terrainProbePoints(lat, lng, 150);
-      return openMeteoElev(far).then(function (z) { return build(z, 150, '90m'); });
-    });
+    return dep3(near).then(build).catch(function () { return dep3(near).then(build); });   // one quiet retry
   }
 
   /* ---------- elevation grid for the thermal-flow layer ---------- */
@@ -155,12 +167,7 @@
     return Promise.all(chunks.map(function (chunk) {
       return dep3(pts(chunk)).then(function (z) {
         store(chunk, z);
-        return chunk.filter(function (k, idx) { return z[idx] == null; });   // gaps (outside lidar coverage) fall back below
-      }, function () { return chunk; }).then(function (left) {
-        var subs = [];
-        for (var j = 0; j < left.length; j += 100) subs.push(left.slice(j, j + 100));
-        return Promise.all(subs.map(function (sub) { return openMeteoElev(pts(sub)).then(function (z) { store(sub, z); }).catch(function () {}); }));
-      });
+      }, function () { /* no signal or the service is down: those points stay unknown until the next look */ });
     })).then(function () {
       persistElev();
       return points.map(function (p) { var v = elev[ek(p[0], p[1])]; return typeof v === 'number' ? v : null; });
