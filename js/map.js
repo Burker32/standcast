@@ -28,8 +28,31 @@
     return n;
   }
 
+  /* Drawn lines (boundaries, roads, cones) drifted during a two-finger zoom. A pinch nearly always twists the map
+   * a little as well, and leaflet-rotate answers every twist by re-measuring the drawing surface for the NEW zoom
+   * while the lines on it are still laid out for the OLD zoom, so they slid by tens of pixels until the fingers
+   * lifted. The fix: while a zoom is in progress, leave that bookkeeping alone. The rotation is still applied by
+   * the pane the drawing sits in, and everything is laid out afresh when the zoom ends. Measured after the fix:
+   * lines stay within about 1 px of the map through a pinch with a twist. */
+  function steadyLinesWhileZooming() {
+    if (!L.Renderer || L.Renderer.prototype._scSteady) return;
+    var getEvents = L.Renderer.prototype.getEvents;
+    L.Renderer.include({
+      _scSteady: true,
+      getEvents: function () {
+        var ev = getEvents.apply(this, arguments), self = this, onRotate = ev.rotate;
+        if (onRotate) ev.rotate = function () {
+          if (self._map && self._zoom != null && self._map.getZoom() !== self._zoom) return;   // mid-zoom: keep the layout that matches the lines
+          return onRotate.apply(self, arguments);
+        };
+        return ev;
+      }
+    });
+  }
+
   function init(containerId, o) {
     opts = o || {};
+    steadyLinesWhileZooming();
     var v = opts.view || SC.store.DEFAULT_VIEW;
     var canRotate = !!(L.Map && L.Map.prototype.setBearing);
     map = L.map(containerId, {
