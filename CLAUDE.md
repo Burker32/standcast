@@ -96,5 +96,5 @@ All are free and need no API key: USGS National Map basemaps, MSDIS (Missouri), 
 
 ## Licences
 
-- **leaflet-rotate 0.2.8 is GPL-3.0** (confirmed from the npm registry and the repo's LICENSE, Oct 2026). Shipping it inside a closed-source paid app is a problem. It has not been replaced: the options are to publish the client code under the GPL, get a separate licence from the author, drop map rotation, or move the map to a library with rotation built in (MapLibre GL JS, BSD). The owner has to choose. Do not add other GPL code.
+- **leaflet-rotate 0.2.8 is GPL-3.0** (confirmed from the npm registry and the repo's LICENSE, Oct 2026). Shipping it inside a closed-source paid app is a problem. **Decided 13 Oct 2026:** leave it in place for now and move the map to MapLibre GL JS (BSD, rotation built in) as part of the store build, not before. Build that in a separate branch with its own test address; the live app and its address stay as they are until the owner approves the switch, so saved data carries over. Do not start the rebuild early, and do not add other GPL code.
 - Leaflet is BSD-2-Clause. Government data sources are public domain. Open-Meteo is no longer used.
