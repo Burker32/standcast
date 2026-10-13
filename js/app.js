@@ -382,6 +382,8 @@
     const body = $('sheet-body'), key = ui.view + ':' + ui.tab + ':' + (ui.selStand || ui.selMark || '') + ':' + (stands().length ? 'has' : 'none') + ':' + (data.ref ? 'fc' : 'nofc');
     const keep = key === lastKey ? body.scrollTop : 0; lastKey = key;
     if (ui.view !== 'add') clearPending();   // left the chooser without picking
+    // moving on to anything else keeps an unsaved pin, the same as tapping Save
+    if (ui.draft && !(ui.draft.kind === 'stand' ? ui.view === 'stand' && ui.selStand === ui.draft.id : ui.view === 'mark' && ui.selMark === ui.draft.id)) ui.draft = null;
     let node;
     if (ui.view === 'add') node = addView();
     else if (ui.view === 'photo') node = photoAddView();
@@ -623,6 +625,7 @@
     const ev = data.evals[s.id], fc = data.fc[s.id], sit = currentSit();
     const root = h('div', { class: 'view' });
     root.appendChild(backHeader('Stand', () => go('list')));
+    if (ui.draft) root.appendChild(draftBar());
     root.appendChild(h('div', { class: 'stand-head' },
       h('input', {
         class: 'name-input', id: 'stand-name', type: 'text', value: s.name, maxlength: 40, 'aria-label': 'Stand name',
@@ -685,6 +688,7 @@
     const t = MT.TYPES[m.type] || MT.TYPES.other;
     const root = h('div', { class: 'view' });
     root.appendChild(backHeader(t.label, () => { go('list'); }));
+    if (ui.draft) root.appendChild(draftBar());
     root.appendChild(h('div', { class: 'type-grid', role: 'radiogroup', 'aria-label': 'Kind of sign' }, MT.ORDER.map((k) => {
       const b = h('button', { class: 'type-btn' + (k === m.type ? ' on' : ''), type: 'button', role: 'radio', 'aria-checked': k === m.type ? 'true' : 'false', onclick: () => { S.updateMark(m.id, { type: k }); renderAll(); } },
         h('span', { class: 'type-dot', style: 'background:' + MT.TYPES[k].color }, MT.icon(k, 16)), MT.TYPES[k].label);
@@ -732,7 +736,9 @@
     // held = you pressed and held a spot, so whatever you pick goes straight there
     const pick = (k) => { if (held) placePending(k); else startPlacing(k); };
     root.appendChild(backHeader(held ? 'Add at this spot' : 'Add to the map', () => go('list')));
-    if (held) root.appendChild(h('p', { class: 'fine' }, 'Pick what goes at the spot you held. Tap the back arrow to cancel.'));
+    if (held) root.appendChild(h('div', { class: 'note draft-bar' },
+      h('p', null, 'Pick what goes at the spot you held. Tap the map to cancel.'),
+      h('button', { class: 'btn small', type: 'button', onclick: () => go('list') }, 'Cancel')));
     root.appendChild(h('div', { class: 'tiles' },
       h('button', { class: 'tile', type: 'button', onclick: () => pick('stand') }, h('span', { class: 'type-dot stand-dot' }, icon('stands', 18)), 'Stand'),
       MT.ORDER.map((k) => h('button', { class: 'tile', type: 'button', onclick: () => pick(k) },
@@ -747,7 +753,7 @@
   function holdAt(lat, lng) {
     if (ui.measure) return;
     if (ui.placing) return placeAt(lat, lng);
-    ui.pending = { lat: lat, lng: lng };
+    ui.pending = { lat: lat, lng: lng, at: Date.now() };
     M.setPending(ui.pending);
     if (navigator.vibrate) { try { navigator.vibrate(15); } catch (e) { /* not allowed, no matter */ } }
     $('landcard').hidden = true;
@@ -761,6 +767,53 @@
     clearPending();
     ui.placing = { kind: kind, file: null };
     placeAt(p.lat, p.lng);
+    // not saved yet: Save keeps it, a tap on the map takes it back off
+    ui.draft = kind === 'stand' ? { kind: 'stand', id: ui.selStand } : { kind: 'mark', id: ui.selMark };
+    renderSheet();
+  }
+  function draftItem() {
+    const d = ui.draft; if (!d) return null;
+    return d.kind === 'stand' ? S.getStand(d.id) : S.getMark(d.id);
+  }
+  // true once you have put work into it, so a stray tap on the map cannot throw that away
+  function draftTouched() {
+    const d = ui.draft, it = draftItem(); if (!it) return false;
+    return d.kind === 'stand' ? !!(it.notes || E.isConfigured(it.winds) || (it.sits || []).length) : !!(it.note || it.photoId);
+  }
+  function saveDraft() {
+    const d = ui.draft; if (!d) return;
+    ui.draft = null;
+    if (d.kind === 'stand') { toast('Stand saved. Mark its good and bad winds.'); renderSheet(); return; }
+    toast('Mark saved');
+    if (isMobile()) setSheet('peek');
+    go('list');
+  }
+  function discardDraft() {
+    const d = ui.draft; if (!d) return;
+    ui.draft = null;
+    if (d.kind === 'stand') { S.removeStand(d.id); recompute(); } else S.removeMark(d.id);
+    toast(d.kind === 'stand' ? 'Stand removed' : 'Mark removed');
+    go('list');
+  }
+  function draftBar() {
+    return h('div', { class: 'note draft-bar' },
+      h('p', null, h('b', null, 'Not saved yet. '), 'Tap Save to keep it. Tap the map to remove it.'),
+      h('div', { class: 'row2' },
+        h('button', { class: 'btn primary', type: 'button', onclick: saveDraft }, 'Save'),
+        h('button', { class: 'btn', type: 'button', onclick: discardDraft }, 'Remove')));
+  }
+  // A plain tap on the map backs out of a press-and-hold: clears the target, or removes the unsaved pin.
+  function tapCancels() {
+    if (ui.pending) {
+      if (Date.now() - ui.pending.at < 600) return true;   // the finger lifting off after the hold is not a tap
+      clearPending(); go('list'); return true;
+    }
+    if (ui.draft) {
+      if (draftTouched()) toast('This one has details now. Tap Save to keep it, or Remove to delete it.');
+      else discardDraft();
+      return true;
+    }
+    return false;
   }
   function placingView() {
     const k = ui.placing ? ui.placing.kind : 'stand';
@@ -1046,7 +1099,7 @@
       h('p', { class: 'line' }, 'Map photos: Summer is USDA aerial photography with the leaves on, refreshed every few years. Leaf-off is Missouri\'s statewide winter photography (north half 2023, south half 2024) with the trees bare, so you can see ridges, benches, trails and openings under the canopy. The round map button cycles Summer, Leaf-off and Topo; Hybrid is under Map layers.'),
       h('p', { class: 'line' }, 'Overlays (Map layers): Lidar terrain is USGS laser-scanned ground shape blended into the photo, so ridges, benches, saddles, ditches and old roads stand out even under timber. Crops 2025 is USDA CropScape: what was grown in each field last season (corn, soybeans, wheat, hay and so on). Each has its own strength slider and works on any base map.'),
       h('p', { class: 'line' }, 'Stand slopes and the thermal flow use the same lidar ground data (1 m where available) for a much closer read of each hillside than before.'),
-      h('p', { class: 'line' }, 'Press and hold any spot on the map to add a stand or a mark right there: a target appears and you pick what it is.'),
+      h('p', { class: 'line' }, 'Press and hold any spot on the map to add a stand or a mark right there: a target appears and you pick what it is, then tap Save. Tap the map at any point before saving to take it back off.'),
       h('p', { class: 'line' }, 'Measure yardage with the ruler button: tap points on the map (tap a stand or mark to snap to it). Each leg shows its yards and the bar shows the total. Drag any point to adjust it.'),
       h('p', { class: 'line' }, 'Tap the locate button to follow yourself: the map keeps you in the middle as you walk and turns around you. Drag the map to stop following.'),
       h('p', { class: 'line' }, 'Turn the map with a two-finger twist (on a computer, hold Shift and drag). The compass needle always points north. Tap it to snap back to north-up, and tap it again to have the map turn with your phone so the way you are facing is up.'),
@@ -1310,7 +1363,7 @@
     let saveTimer = null;
     M.init('map', {
       view: settings().view, basemap: settings().basemap,
-      onTap: (ll) => { if (ui.measure) addMeasurePoint(ll.lat, ll.lng); else if (ui.placing) placeAt(ll.lat, ll.lng); },
+      onTap: (ll) => { if (ui.measure) addMeasurePoint(ll.lat, ll.lng); else if (ui.placing) placeAt(ll.lat, ll.lng); else tapCancels(); },
       onHold: (ll) => holdAt(ll.lat, ll.lng),
       onSelectStand: (id) => { if (ui.measure) { const s = S.getStand(id); if (s) addMeasurePoint(s.lat, s.lng); } else if (!ui.placing) selectStand(id); },
       onSelectMark: (id) => { if (ui.measure) { const m = S.getMark(id); if (m) addMeasurePoint(m.lat, m.lng); } else if (!ui.placing) selectMark(id); },
@@ -1322,7 +1375,7 @@
     });
     try { if (SC.publand && M.leaflet) {
       SC.publand.attach(M.leaflet, {
-        onTap: (info, ll) => { if (ui.measure && ll) addMeasurePoint(ll.lat, ll.lng); else if (ui.placing && ll) placeAt(ll.lat, ll.lng); else showLand(info); },
+        onTap: (info, ll) => { if (ui.measure && ll) addMeasurePoint(ll.lat, ll.lng); else if (ui.placing && ll) placeAt(ll.lat, ll.lng); else if (!tapCancels()) showLand(info); },
         onStatus: (st) => { if (st === 'error') toast('Could not load public land. Check your signal.'); }
       });
       SC.publand.setEnabled(settings().layers.publand !== false);
