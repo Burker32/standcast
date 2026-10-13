@@ -1192,7 +1192,8 @@
       h('p', { class: 'line' }, 'Map photos: Summer is USDA aerial photography with the leaves on, refreshed every few years. Leaf-off is winter photography with the trees bare, so you can see ridges, benches, trails and openings under the canopy. It covers Missouri (2023 and 2024) and Wisconsin (2018 to 2024, by county); anywhere else it shows the summer photo. The round map button cycles Summer, Leaf-off and Topo; Hybrid is under Map layers.'),
       h('p', { class: 'line' }, 'Overlays (Map layers): Lidar terrain is USGS laser-scanned ground shape blended into the photo, so ridges, benches, saddles, ditches and old roads stand out even under timber. Crops 2025 is USDA CropScape: what was grown in each field last season (corn, soybeans, wheat, hay and so on). Each has its own strength slider and works on any base map.'),
       h('p', { class: 'line' }, 'Find a place with the magnifier at the top: type a town, lake, creek, landform or piece of public land anywhere in the country and tap a result to go there. Add a state, like “Stockton WI”, to narrow it. Coordinates such as 37.8096, -93.6250 work too. For a street address, give the town and state or a ZIP, like “100 South St, Stockton, MO”. Road names are searched within about 25 miles of where the map is looking.'),
-      h('p', { class: 'line' }, 'Roads and trails (Map layers) draws lines over any map: a solid line is a road, long dashes are a 4WD or closed road, and dots are a trail. Tap a line for its name. It comes from national road and trail records, so many woods roads and most unofficial trails are missing. Road names and route numbers adds road labels.'),
+      h('p', { class: 'line' }, 'Roads and trails (Map layers) draws lines over any map: a solid line is a road, long dashes are a 4WD or closed road, and dots are a trail. Tap a line for its name. It comes from national road and trail records, so many woods roads and most unofficial trails are missing. Route numbers are written about every 5 miles along a highway. Road names adds the name of each road.'),
+      h('p', { class: 'line' }, 'Creeks and rivers (Map layers) draws the national stream records in blue over any map: a solid line runs year-round, a dashed line runs part of the year, and named streams are labelled. Roads and streams come from national records, good to within several yards in most places but not surveyed, so a creek or woods road can sit a little off its true line.'),
       h('p', { class: 'line' }, 'Town names and the names of public land are written on every map. Towns show in white and public land in pale green italics; far out you see state names and big cities, and smaller towns and public land appear as you zoom in. Names that would overlap are left out, the bigger town winning. Roads work the same way: main highways when zoomed out, local roads and trails up close. Switch them off under Map layers (Town and public land names).'),
       h('p', { class: 'line' }, 'Benches (Map layers) shades flat strips part-way up a hillside: ground that is clearly flatter than the slope above and below it. It is worked out from the lidar ground data for the area on screen, so zoom in to use it. It only knows the shape of the ground, so treat it as places worth walking, not proof deer travel there.'),
       h('p', { class: 'line' }, 'Saddles and Funnels (Map layers) show as small dark badges with a green rim, only the strongest few in view so the map stays readable. A round badge is a saddle: a low gap in a ridge. A square badge is a funnel: easy walking squeezed between steep ground or water. Tap a badge to see what it found. Like benches, they come from the shape of the ground only.'),
@@ -1257,6 +1258,7 @@
       if (c.checked && (c.dataset.ov === 'hillshade' || c.dataset.ov === 'contours')) toast((c.dataset.ov === 'contours' ? 'Contours' : 'Lidar terrain') + ' draw on demand, so give it a few seconds the first time.');
       if (c.checked && c.dataset.ov === 'contours' && M.zoom < 13) toast('Zoom in closer to see the 10 ft contour lines.');
       if (c.checked && c.dataset.ov === 'roadlines') toast(M.zoom < SC.roads.MIN_ZOOM ? 'Showing main highways. Zoom in for local roads and trails.' : 'Loading roads and trails. Tap a line for its name.');
+      if (c.checked && c.dataset.ov === 'hydro' && M.zoom < 9) toast('Zoom in to see creeks and rivers.');
       if (c.checked && c.dataset.ov === 'labels') toast(M.zoom < 12 ? 'Zoom in closer to see road names.' : 'Road names draw on demand, so give them a few seconds.');
       if (c.checked && c.dataset.ov === 'benches') loadBenches(true);
       if (c.checked && (c.dataset.ov === 'saddles' || c.dataset.ov === 'funnels')) loadSpots(true);
@@ -1355,11 +1357,11 @@
       h('p', { class: 'lc-fine' }, 'From PAD-US, the national public land inventory. Lines can be off and public does not always mean open to hunting. Check the manager\'s maps and regulations before you go.'));
     card.hidden = false;
   }
-  const OV_DEFAULT = { hillshade: 0.6, contours: 0.9, crops: 0.45, benches: 0.75, labels: 1 };
+  const OV_DEFAULT = { hillshade: 0.6, contours: 0.9, crops: 0.45, benches: 0.75, labels: 1, hydro: 1 };
   function ovOpacity(name) { const o = settings().ovOpacity || {}; return o[name] != null ? o[name] : OV_DEFAULT[name]; }
   function applyOverlays() {
     const on = settings().overlays || {};
-    ['hillshade', 'contours', 'crops', 'labels'].forEach((n) => M.setOverlay(n, !!on[n], ovOpacity(n)));
+    ['hillshade', 'contours', 'crops', 'labels', 'hydro'].forEach((n) => M.setOverlay(n, !!on[n], ovOpacity(n)));
     if (SC.roads) SC.roads.setEnabled(!!on.roadlines);
     if (SC.labels) SC.labels.setEnabled(on.names !== false);   // on unless switched off
     loadBenches(); loadSpots();

@@ -145,6 +145,11 @@
       lay = L.tileLayer(OVER.contours.url + '?{z}/{x}/{y}', { tileSize: OV_TILE, zoomOffset: -1, minZoom: 13, maxNativeZoom: 17, maxZoom: 19, opacity: opacity,
         crossOrigin: true, className: 'ov-contours', attribution: OVER.contours.attr, zIndex: 6 });
       lay.getTileUrl = function (c) { return depUrl('contours', c.z, c.x, c.y, 512, 'png'); };
+    } else if (name === 'hydro') {
+      // Creeks and rivers from the National Hydrography Dataset, pre-drawn by USGS as map tiles: solid blue for
+      // year-round streams, dashed for ones that run part of the year, with their names. Fast, and kept offline.
+      lay = L.tileLayer(TILE_BASE + 'USGSHydroCached/MapServer/tile/{z}/{y}/{x}', { maxNativeZoom: 16, maxZoom: 19, minZoom: 9, opacity: opacity, crossOrigin: true,
+        className: 'ov-hydro', attribution: 'Creeks and rivers: <a href="https://www.usgs.gov/national-hydrography">USGS NHD</a>', zIndex: 9 });
     } else if (name === 'labels') {
       // roads and place names drawn by USGS over whatever photo is showing (the Summer and Leaf-off photos have none)
       var px = (window.devicePixelRatio || 1) > 1.5 ? 1024 : 512;
@@ -154,7 +159,8 @@
         tl.getTileUrl = function (c) {
           var span = 2 * R / Math.pow(2, c.z) * (OV_TILE / 256), x0 = -R + c.x * span, y1 = R - c.y * span;
           return CARTO + svc + '/MapServer/export?bbox=' + [x0, y1 - span, x0 + span, y1].map(function (v) { return v.toFixed(2); }).join(',') +
-            '&bboxSR=3857&imageSR=3857&size=' + px + ',' + px + '&dpi=' + Math.round(96 * px / OV_TILE) + '&format=png32&transparent=true&f=image';
+            '&bboxSR=3857&imageSR=3857&size=' + px + ',' + px + '&dpi=' + Math.round(96 * px / OV_TILE) +
+            '&layers=show:19,20,21,22,24&format=png32&transparent=true&f=image';   // road, forest-road and trail names only; route numbers are drawn by roads.js, spaced out
         };
         return tl;
       };
