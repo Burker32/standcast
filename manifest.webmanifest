@@ -1,0 +1,17 @@
+{
+  "name": "StandCast",
+  "short_name": "StandCast",
+  "description": "Pick the right stand for tonight's wind. Modeled wind, estimated thermals and scent cones on your own map.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f1411",
+  "theme_color": "#0f1411",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

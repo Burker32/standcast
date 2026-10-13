@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>StandCast</title>
+  <meta name="description" content="Pick the right stand for tonight's wind. Modeled wind, estimated thermals and scent cones on your own map.">
+  <meta name="theme-color" content="#0f1411" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f1efe6" media="(prefers-color-scheme: light)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="StandCast">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Barlow+Condensed:wght@600;700&display=swap">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <main id="app">
+    <div id="map" role="application" aria-label="Map of your stands"></div>
+
+    <header id="top">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 32 32" width="26" height="26" aria-hidden="true">
+          <path d="M16 16 L28 6 A16 16 0 0 1 28 26 Z" fill="currentColor" opacity=".35"/>
+          <path d="M16 16 L28 6 M16 16 L28 26" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>
+          <circle cx="9" cy="16" r="5" fill="none" stroke="currentColor" stroke-width="2.4"/>
+          <circle cx="9" cy="16" r="1.6" fill="currentColor"/>
+        </svg>
+        <span class="brand-name">StandCast</span>
+      </div>
+      <button id="status" class="chip" type="button" hidden></button>
+      <div class="top-actions">
+        <button id="btn-base" class="round base-btn" type="button" aria-label="Switch map"><i></i><span>Topo</span></button>
+        <button id="btn-layers" class="round" type="button" aria-label="Map layers" aria-expanded="false" aria-controls="layers"></button>
+        <button id="btn-locate" class="round" type="button" aria-label="Show my location"></button>
+      </div>
+    </header>
+
+    <button id="compass" class="round compass" type="button" aria-label="Compass. Tap to point the map north." hidden>
+      <svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true"><g class="needle">
+        <path d="M20 4 L26 20 L20 17 L14 20 Z" fill="#e0412f"/><path d="M20 36 L14 20 L20 23 L26 20 Z" fill="currentColor" opacity=".55"/>
+        <text x="20" y="13.5" text-anchor="middle" font-size="7" font-weight="700" fill="#fff">N</text></g></svg>
+    </button>
+    <button id="btn-measure" class="round measure-btn" type="button" aria-label="Measure distance in yards"></button>
+    <div id="measurebar" class="measurebar" role="region" aria-label="Measure" hidden>
+      <div class="mb-read"><b class="mb-total">0 yd</b><span class="mb-sub"></span></div>
+      <div class="mb-actions">
+        <button type="button" class="btn small" data-m="me">From me</button>
+        <button type="button" class="btn small" data-m="undo">Undo</button>
+        <button type="button" class="btn small" data-m="clear">Clear</button>
+        <button type="button" class="btn small primary" data-m="done">Done</button>
+      </div>
+    </div>
+    <div id="layers" class="pop" hidden>
+      <div class="seg seg4" role="group" aria-label="Map style">
+        <button type="button" data-base="imagery">Summer</button>
+        <button type="button" data-base="leafoff">Leaf-off</button>
+        <button type="button" data-base="hybrid">Hybrid</button>
+        <button type="button" data-base="topo">Topo</button>
+      </div>
+      <p class="pop-fine">Summer: leaves on (USDA photos). Leaf-off: bare winter trees, Missouri 2023–24.</p>
+      <p class="pop-h">Overlays</p>
+      <div class="ov-row">
+        <label class="check"><input type="checkbox" data-ov="hillshade"><span class="sw sw-hill"></span>Lidar terrain</label>
+        <input type="range" class="ov-op" data-ovop="hillshade" min="15" max="100" step="5" aria-label="Lidar terrain strength">
+      </div>
+      <div class="ov-row">
+        <label class="check"><input type="checkbox" data-ov="contours"><span class="sw sw-cont"></span>Contours 10 ft</label>
+        <input type="range" class="ov-op" data-ovop="contours" min="20" max="100" step="5" aria-label="Contour line strength">
+      </div>
+      <div class="ov-row">
+        <label class="check"><input type="checkbox" data-ov="crops"><span class="sw sw-crops"></span>Crops 2025</label>
+        <input type="range" class="ov-op" data-ovop="crops" min="15" max="100" step="5" aria-label="Crops see-through">
+      </div>
+      <div class="crop-key" aria-hidden="true">
+        <span><i style="--c:#ffd300"></i>Corn</span><span><i style="--c:#267000"></i>Soybeans</span><span><i style="--c:#a87000"></i>Wheat</span>
+        <span><i style="--c:#ffa8e3"></i>Alfalfa</span><span><i style="--c:#a5f58d"></i>Hay</span><span><i style="--c:#e8ffbf"></i>Grass/pasture</span>
+        <span><i style="--c:#93cc93"></i>Forest</span><span><i style="--c:#4970a3"></i>Water</span>
+      </div>
+      <p class="pop-h">Show air</p>
+      <div class="seg" role="group" aria-label="Which air to show">
+        <button type="button" data-air="both">Both</button>
+        <button type="button" data-air="wind">Wind</button>
+        <button type="button" data-air="thermal">Thermals</button>
+      </div>
+      <label class="check"><input type="checkbox" data-layer="wind"><span class="sw sw-wind"></span>Wind arrows</label>
+      <label class="check"><input type="checkbox" data-layer="thermal"><span class="sw sw-thermal"></span>Thermals at stands (estimated)</label>
+      <label class="check"><input type="checkbox" data-layer="field"><span class="sw sw-thermal"></span>Thermal flow across the map</label>
+      <label class="check"><input type="checkbox" data-layer="animate"><span class="sw sw-anim"></span>Moving air (animation)</label>
+      <label class="check"><input type="checkbox" data-layer="swirl"><span class="sw sw-swirl"></span>Swirl spots (estimated)</label>
+      <label class="check"><input type="checkbox" data-layer="cone"><span class="sw sw-cone"></span>Scent cones</label>
+      <label class="check"><input type="checkbox" data-layer="publand"><span class="sw sw-land"></span>Public land (PAD-US)</label>
+      <div class="land-key" aria-hidden="true"><span><i style="--c:#f2b134"></i>Federal</span><span><i style="--c:#3fa7d6"></i>State</span><span><i style="--c:#a57fe0"></i>Local</span><span><i class="dash"></i>Restricted</span></div>
+      <label class="check"><input type="checkbox" data-layer="marks"><span class="sw sw-marks"></span>Marks and photos</label>
+    </div>
+
+    <div id="banner" class="banner" hidden>
+      <span id="banner-text"></span>
+      <div class="banner-actions">
+        <button id="banner-locate" class="btn small" type="button">Use my location</button>
+        <button id="banner-cancel" class="btn small" type="button">Cancel</button>
+      </div>
+    </div>
+
+    <section id="sheet" class="sheet" data-size="half" aria-label="Stand ranking and notes">
+      <button id="fab" class="fab" type="button" aria-label="Add a stand or mark"></button>
+      <div class="sheet-head">
+        <button id="grab" class="grab" type="button" aria-label="Resize panel"><span></span></button>
+        <div id="scrub" class="scrub">
+          <div class="scrub-row">
+            <div class="scrub-times"><b id="scrub-time">Add a stand to see wind</b><span id="scrub-sun"></span></div>
+            <button id="scrub-now" class="btn small" type="button">Now</button>
+          </div>
+          <input id="scrub-range" type="range" min="0" max="100" value="0" aria-label="Time on the map">
+          <div class="legend" aria-hidden="true">
+            <span><i class="lg-wind"></i>Wind</span>
+            <span><i class="lg-therm"></i>Thermals ↑↓</span>
+            <span><i class="lg-swirl"></i>Swirl</span>
+            <span><i class="lg-cone"></i>Scent</span>
+          </div>
+        </div>
+      </div>
+      <div id="sheet-body" class="sheet-scroll"></div>
+      <nav id="tabs" class="tabs" role="tablist" aria-label="Sections">
+        <button type="button" role="tab" data-tab="stands" aria-selected="true"></button>
+        <button type="button" role="tab" data-tab="marks" aria-selected="false"></button>
+        <button type="button" role="tab" data-tab="guide" aria-selected="false"></button>
+      </nav>
+    </section>
+
+    <div id="landcard" class="landcard" role="dialog" aria-label="Public land details" hidden></div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <input id="file-photo" type="file" accept="image/*" hidden>
+    <input id="file-import" type="file" accept="application/json,.json" hidden>
+  </main>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script>window.L || document.write('<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>')</script>
+  <script>window.L || document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"><\/script>')</script>
+  <script>window.L && document.write('<script src="vendor/leaflet-rotate/leaflet-rotate-src.js"><\/script>')</script>
+  <script>window.L && L.Map && !L.Map.prototype.setBearing && document.write('<script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"><\/script>')</script>
+  <script>window.L && L.Map && !L.Map.prototype.setBearing && document.write('<script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"><\/script>')</script>
+  <script src="js/engine.js"></script>
+  <script src="js/exif.js"></script>
+  <script src="js/marktypes.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/weather.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/flow.js"></script>
+  <script src="js/publand.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

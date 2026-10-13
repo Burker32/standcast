@@ -1,0 +1,13 @@
+# private notes: never publish
+CLAUDE.local.md
+.claude/
+
+# dependencies and packaged builds
+node_modules/
+*.zip
+
+# OS and editor junk
+Thumbs.db
+desktop.ini
+.DS_Store
+*.log
