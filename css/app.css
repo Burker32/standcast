@@ -447,6 +447,12 @@ textarea { resize: vertical; min-height: 96px; line-height: 1.4; }
 .measure-btn { position: absolute; z-index: 650; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 138px); }
 @media (min-width: 960px) { .measure-btn { top: 130px; } }
 .measure-btn.on { background: #ffd23f; color: #1a1a1a; border-color: #e0b300; }
+/* add a photo: a labelled button beside the + so it rides on the panel edge and is always in reach */
+.fab-photo {
+  right: 84px; width: auto; padding: 0 18px 0 14px; border-radius: 28px; display: flex; align-items: center; gap: 8px;
+  background: var(--surface); color: var(--fg); border: 1px solid var(--line); font: 700 15px/1 var(--body);
+}
+@media (min-width: 960px) { .fab-photo { right: 92px; } }
 .measurebar {
   position: absolute; z-index: 820; left: 12px; right: 68px; top: calc(env(safe-area-inset-top, 0px) + 64px);
   display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 14px;

@@ -395,7 +395,7 @@
       b.setAttribute('aria-selected', on ? 'true' : 'false');
       b.classList.toggle('on', on);
     });
-    $('fab').hidden = ui.view === 'placing';
+    $('fab').hidden = $('btn-photo').hidden = ui.view === 'placing';
   }
   function renderAll() { renderMap(); renderSheet(); renderScrub(); renderStatus(); }
 
@@ -450,6 +450,7 @@
     root.appendChild(h('div', { class: 'view-head' },
       h('h2', null, 'Which stand?'),
       win ? h('p', { class: 'sub' }, E.fmtDayClock(sit.start) + ' to ' + E.fmtClock(sit.end)) : null));
+    const note = backupNote(); if (note) root.appendChild(note);
     if (data.sits.length) {
       root.appendChild(h('div', { class: 'chips', role: 'tablist', 'aria-label': 'Hunt window' },
         data.sits.map((s) => h('button', {
@@ -700,9 +701,13 @@
     root.appendChild(h('div', { class: 'view-head' }, h('h2', null, 'Marks and photos'), h('p', { class: 'sub' }, all.length ? all.length + ' on the map' : 'Scrapes, rubs, bedding, food and trails')));
     if (!all.length) {
       root.appendChild(h('div', { class: 'empty small' }, h('p', null, 'Drop a pin where you find sign, add a note and a photo, and it stays on your map. Photos with location data place their own pin.'),
-        h('button', { class: 'btn primary', type: 'button', onclick: () => go('add') }, icon('plus', 16), 'Add a mark')));
+        h('div', { class: 'stack' },
+          h('button', { class: 'btn primary', type: 'button', onclick: () => go('add') }, icon('plus', 16), 'Add a mark'),
+          h('button', { class: 'btn', type: 'button', onclick: () => pickPhoto(placeFromPhoto) }, icon('photo', 16), 'Add a photo'))));
       return root;
     }
+    const note = backupNote(); if (note) root.appendChild(note);
+    root.appendChild(h('button', { class: 'btn wide-btn', type: 'button', onclick: () => pickPhoto(placeFromPhoto) }, icon('photo', 16), 'Add a photo'));
     const counts = {}; all.forEach((m) => { counts[m.type] = (counts[m.type] || 0) + 1; });
     root.appendChild(h('div', { class: 'chips' },
       [['all', 'All ' + all.length]].concat(MT.ORDER.filter((k) => counts[k]).map((k) => [k, MT.TYPES[k].label + ' ' + counts[k]]))
@@ -840,7 +845,7 @@
     }).catch((e) => toast(e.message || 'Could not add that photo.'));
   }
   function placeFromPhoto(file) {
-    (file.arrayBuffer ? file.arrayBuffer() : Promise.resolve(null)).then((buf) => {
+    (file.arrayBuffer ? file.arrayBuffer() : Promise.resolve(null)).catch(() => null).then((buf) => {
       const gps = buf ? SC.exif.readGps(buf) : null;
       if (gps) {
         ui.placing = { kind: 'other', file: file };
@@ -848,7 +853,8 @@
         M.flyTo(gps.lat, gps.lng, 17, isMobile() ? $('sheet').offsetHeight : 0);
         toast('Placed from the photo’s location. Pick the kind of sign.');
       } else {
-        toast('That photo has no location. Tap the map to place it.');
+        // phones often leave the location out of a photo taken straight from the browser
+        toast('That photo has no location. Tap the map where you took it, or tap Use my location.');
         startPlacing('other', file);
       }
     });
@@ -875,6 +881,30 @@
     const a = h('a', { href: URL.createObjectURL(blob), download: name });
     document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  /* ---- backup ---- */
+  function saveBackup() {
+    return S.exportAll().then((b) => {
+      download('standcast-backup-' + new Date().toISOString().slice(0, 10) + '.json', b);
+      S.markBackedUp();
+      toast('Backup saved to your downloads. Keep a copy somewhere off this phone too.');
+      renderSheet();
+    }).catch(() => toast('Could not make the backup.'));
+  }
+  function backupAge(at) {
+    if (!at) return 'never';
+    const d = Math.floor((Date.now() - at) / 86400000);
+    return d <= 0 ? 'today' : d === 1 ? 'yesterday' : d + ' days ago';
+  }
+  // A nudge at the top of the Stands and Marks lists when there is new work that is not in a backup yet.
+  function backupNote() {
+    const due = S.backupDue(); if (!due) return null;
+    const what = [due.stands ? due.stands + (due.stands === 1 ? ' stand' : ' stands') : null, due.marks ? due.marks + (due.marks === 1 ? ' mark' : ' marks') : null].filter(Boolean).join(' and ');
+    return h('div', { class: 'note warn' },
+      h('p', null, h('b', null, 'Back up your map. '), 'Your ' + what + (due.stands + due.marks === 1 ? ' is' : ' are') + ' saved only on this phone. Last backup: ' + backupAge(due.at) + '.'),
+      h('div', { class: 'row2' },
+        h('button', { class: 'btn small primary', type: 'button', onclick: saveBackup }, 'Save a backup'),
+        h('button', { class: 'btn small', type: 'button', onclick: () => { S.snoozeBackup(7); renderSheet(); } }, 'Remind me later')));
   }
   function guideView() {
     const root = h('div', { class: 'view' });
@@ -910,9 +940,10 @@
       h('p', { class: 'line' }, 'Zoom to the property you hunt, then save the map. Your stands, marks and the last forecast also work offline. Install StandCast to your home screen for the best results.'), sizeBtn));
     const imp = $('file-import');
     root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Backup'),
-      h('p', { class: 'line' }, 'Your data lives on this device. Save a backup before you clear browser data or switch phones.'),
+      h('p', { class: 'line' }, 'Your data lives on this device. Save a backup before you clear browser data or switch phones. The backup file holds your stands, marks and photos.'),
+      h('p', { class: 'fine' }, 'Last backup: ' + backupAge(settings().backup.at) + '.'),
       h('div', { class: 'row2' },
-        h('button', { class: 'btn', type: 'button', onclick: () => S.exportAll().then((b) => download('standcast-backup-' + new Date().toISOString().slice(0, 10) + '.json', b)).catch(() => toast('Could not make the backup.')) }, 'Save a backup'),
+        h('button', { class: 'btn', type: 'button', onclick: saveBackup }, 'Save a backup'),
         h('button', { class: 'btn', type: 'button', onclick: () => { imp.value = ''; imp.click(); } }, 'Restore a backup'))));
     const ex = stands().filter((s) => s.example);
     root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Example data'),
@@ -1181,6 +1212,8 @@
     }
     $('btn-measure').appendChild(icon('ruler', 22));
     $('btn-measure').addEventListener('click', () => { if (ui.measure) endMeasure(); else startMeasure(); });
+    $('btn-photo').insertBefore(icon('photo', 22), $('btn-photo').firstChild);
+    $('btn-photo').addEventListener('click', () => { if (ui.measure) endMeasure(); if (ui.placing) endPlacing(); pickPhoto(placeFromPhoto); });
     $('measurebar').addEventListener('click', (e) => {
       const b = e.target.closest('[data-m]'); if (!b || !ui.measure) return;
       const k = b.dataset.m;

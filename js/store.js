@@ -11,7 +11,8 @@
   function fresh() {
     return {
       v: 1, stands: [], marks: [],
-      settings: { basemap: 'imagery', layers: { wind: true, thermal: true, field: true, swirl: true, animate: true, publand: true, cone: true, marks: true }, view: DEFAULT_VIEW }
+      settings: { basemap: 'imagery', layers: { wind: true, thermal: true, field: true, swirl: true, animate: true, publand: true, cone: true, marks: true }, view: DEFAULT_VIEW,
+        backup: { at: 0, sig: null, snooze: 0 } }   // when the last backup was saved, what it held, and "remind me later" until
     };
   }
   function migrate(s) {
@@ -22,6 +23,7 @@
     s.settings = Object.assign({}, f.settings, s.settings || {});
     s.settings.layers = Object.assign({}, f.settings.layers, s.settings.layers || {});
     s.settings.view = Object.assign({}, f.settings.view, s.settings.view || {});
+    s.settings.backup = Object.assign({}, f.settings.backup, s.settings.backup || {});
     return s;
   }
   function load() {
@@ -139,11 +141,51 @@
       return new Blob([JSON.stringify({ app: 'standcast', exportedAt: new Date().toISOString(), data: copy }, null, 1)], { type: 'application/json' });
     });
   }
+  /* ---------- backup reminder ----------
+   * The data lives only on this device, so nudge for a backup when there is something new to lose. */
+  var DAY = 86400000;
+  function realItems() {
+    return { stands: state.stands.filter(function (s) { return !s.example; }), marks: state.marks };
+  }
+  // A short fingerprint of what the user has entered (not forecast or terrain data, which refresh by themselves).
+  function dataSig() {
+    var r = realItems();
+    var text = JSON.stringify([
+      r.stands.map(function (s) { return [s.id, s.name, s.type, s.lat, s.lng, s.winds, s.notes, s.override, s.sits]; }),
+      r.marks.map(function (m) { return [m.id, m.type, m.lat, m.lng, m.note, m.photoId]; })
+    ]);
+    var hash = 5381;
+    for (var i = 0; i < text.length; i++) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
+    return text.length + ':' + hash;
+  }
+  function markBackedUp(now) {
+    state.settings.backup = { at: now || Date.now(), sig: dataSig(), snooze: 0 }; save();
+  }
+  function snoozeBackup(days, now) {
+    state.settings.backup.snooze = (now || Date.now()) + days * DAY; save();
+  }
+  // null when no reminder is due, otherwise { stands, marks, at } for the reminder text.
+  function backupDue(now) {
+    now = now || Date.now();
+    var r = realItems(), b = state.settings.backup;
+    if (!r.stands.length && !r.marks.length) return null;
+    if (now < b.snooze || dataSig() === b.sig) return null;
+    if (b.at) { if (now - b.at < 7 * DAY) return null; }
+    else {
+      // never backed up: give a new user a day before the first nudge
+      var oldest = now;
+      r.stands.concat(r.marks).forEach(function (x) { oldest = Math.min(oldest, x.createdAt || 0); });
+      if (now - oldest < DAY) return null;
+    }
+    return { stands: r.stands.length, marks: r.marks.length, at: b.at };
+  }
+
   function importAll(text) {
     var parsed;
     try { parsed = JSON.parse(text); } catch (e) { return Promise.reject(new Error('That file is not a StandCast backup.')); }
     if (!parsed || parsed.app !== 'standcast' || !parsed.data) return Promise.reject(new Error('That file is not a StandCast backup.'));
     var incoming = migrate(parsed.data), added = { stands: 0, marks: 0 };
+    var wasEmpty = !state.stands.length && !state.marks.length;
     var haveS = {}, haveM = {};
     state.stands.forEach(function (s) { haveS[s.id] = 1; });
     state.marks.forEach(function (m) { haveM[m.id] = 1; });
@@ -156,7 +198,11 @@
         p = fetch(data).then(function (r) { return r.blob(); }).then(putPhoto).then(function (id) { m.photoId = id; });
       } else { m.photoId = null; }
       return p.catch(function () { m.photoId = null; }).then(function () { state.marks.push(m); added.marks++; });
-    })).then(function () { save(); return added; });
+    })).then(function () {
+      save();
+      if (wasEmpty) markBackedUp();   // everything here just came from a backup file
+      return added;
+    });
   }
   function clearAll() {
     state.marks.forEach(function (m) { if (m.photoId) deletePhoto(m.photoId); });
@@ -170,7 +216,8 @@
     addStand: addStand, getStand: getStand, updateStand: updateStand, removeStand: removeStand,
     addMark: addMark, getMark: getMark, updateMark: updateMark, removeMark: removeMark,
     putPhoto: putPhoto, photoUrl: photoUrl, deletePhoto: deletePhoto,
-    exportAll: exportAll, importAll: importAll, clearAll: clearAll
+    exportAll: exportAll, importAll: importAll, clearAll: clearAll,
+    backupDue: backupDue, markBackedUp: markBackedUp, snoozeBackup: snoozeBackup
   };
   SC.store = api;
 })();
