@@ -8,25 +8,35 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  function readGps(buf) {
+  function readGps(buf) { return inspect(buf).gps; }
+
+  // Like readGps, but also says why there is no location, so the app can tell the user:
+  //   'not-jpeg'  another kind of file (HEIC, PNG, a screenshot...)
+  //   'no-exif'   a JPEG with its camera details removed (a copy from a message app, or an edited photo)
+  //   'no-gps'    camera details are there, but no location was saved with them
+  //   'blanked'   the location fields are there but emptied, which is how Android hides it from web apps
+  function inspect(buf) {
+    var none = function (why) { return { gps: null, why: why }; };
     try {
       var v = new DataView(buf);
-      if (v.byteLength < 12 || v.getUint16(0) !== 0xFFD8) return null;
+      if (v.byteLength < 12 || v.getUint16(0) !== 0xFFD8) return none('not-jpeg');
       var off = 2;
       while (off + 4 < v.byteLength) {
         var marker = v.getUint16(off);
         off += 2;
-        if (marker === 0xFFDA || (marker & 0xFF00) !== 0xFF00) return null;
+        if (marker === 0xFFDA || (marker & 0xFF00) !== 0xFF00) return none('no-exif');
         var len = v.getUint16(off);
         if (marker === 0xFFE1 && v.getUint32(off + 2) === 0x45786966 && v.getUint16(off + 6) === 0) {
-          return parseTiff(v, off + 8);
+          var r = parseTiff(v, off + 8);
+          return r && r.lat != null ? { gps: r, why: null } : none(r && r.blanked ? 'blanked' : 'no-gps');
         }
         off += len;
       }
     } catch (e) { /* truncated or malformed file */ }
-    return null;
+    return none('no-exif');
   }
 
+  // { lat, lng } when there is a location, { blanked: true } when the fields are there but empty, else null.
   function parseTiff(v, tiff) {
     var little = v.getUint16(tiff) === 0x4949;
     var u16 = function (o) { return v.getUint16(o, little); };
@@ -55,12 +65,13 @@
       else if (tag === 2) lat = rationals(en);
       else if (tag === 4) lng = rationals(en);
     }
-    if (lat == null || lng == null || (lat === 0 && lng === 0)) return null;
+    if (lat == null || lng == null) return count ? { blanked: true } : null;
+    if (lat === 0 && lng === 0) return { blanked: true };
     if (latRef === 'S') lat = -lat;
     if (lngRef === 'W') lng = -lng;
     if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
     return { lat: lat, lng: lng };
   }
 
-  return { readGps: readGps };
+  return { readGps: readGps, inspect: inspect };
 });

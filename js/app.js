@@ -788,12 +788,12 @@
     M.locate().then((p) => { ui.measure.pts.unshift({ lat: p.lat, lng: p.lng }); drawMeasure(); }).catch((e) => toast(e.message));
   }
 
-  function startPlacing(kind, file) {
+  function startPlacing(kind, file, why) {
     if (ui.measure) endMeasure();
     ui.placing = { kind: kind, file: file || null }; ui.view = 'placing'; ui.selStand = null; ui.selMark = null;
     if (isMobile()) setSheet('peek');
     M.setPlacing(true);
-    $('banner-text').textContent = file ? 'Tap the map where you took the photo.'
+    $('banner-text').textContent = why ? why : file ? 'Tap the map where you took the photo.'
       : 'Tap the map to place your ' + (kind === 'stand' ? 'stand' : (MT.TYPES[kind] || MT.TYPES.other).label.toLowerCase()) + '.';
     $('banner').hidden = false;
     renderAll();
@@ -849,8 +849,19 @@
       renderAll();
     }).catch((e) => toast(e.message || 'Could not add that photo.'));
   }
-  function photoGps(file) {
-    return (file.arrayBuffer ? file.arrayBuffer() : Promise.resolve(null)).catch(() => null).then((buf) => (buf ? SC.exif.readGps(buf) : null));
+  // { gps, why }: the location saved in the photo, or the reason there is none
+  function photoInfo(file) {
+    return (file.arrayBuffer ? file.arrayBuffer() : Promise.resolve(null)).catch(() => null).then((buf) => (buf ? SC.exif.inspect(buf) : { gps: null, why: 'no-exif' }));
+  }
+  function photoGps(file) { return photoInfo(file).then((r) => r.gps); }
+  // Plain words for why a photo from the library could not place its own pin.
+  function noLocationReason(why) {
+    const android = /Android/i.test(navigator.userAgent);
+    if (why === 'not-jpeg') return 'This kind of picture (a screenshot or a non-JPEG photo) has no location the app can read.';
+    if (why === 'no-exif') return 'This photo has had its camera details removed, which happens to copies sent by text or saved from an app.';
+    if (android) return 'No location came through with this photo. Android hides photo locations from web apps, so library photos cannot place themselves on this phone.';
+    if (why === 'blanked') return 'The location in this photo was left blank by the phone.';
+    return 'This photo was saved without a location. Check that location is turned on for your camera.';
   }
   function dropPhotoPin(file, lat, lng, msg) {
     ui.placing = { kind: 'other', file: file };
@@ -858,12 +869,13 @@
     M.flyTo(lat, lng, 17, isMobile() ? $('sheet').offsetHeight : 0);
     toast(msg);
   }
-  function placePhotoByHand(file, msg) { toast(msg); startPlacing('other', file); }
+  // msg stays on the banner until the pin is placed, so there is time to read why
+  function placePhotoByHand(file, msg) { startPlacing('other', file, msg + ' Tap the map where you took it.'); }
   // A photo from the library: use the location saved in it, if it has one.
   function placeFromPhoto(file) {
-    photoGps(file).then((gps) => {
-      if (gps) dropPhotoPin(file, gps.lat, gps.lng, 'Placed from the photo’s location. Pick the kind of sign.');
-      else placePhotoByHand(file, 'That photo has no location saved in it. Tap the map where you took it.');
+    photoInfo(file).then((r) => {
+      if (r.gps) dropPhotoPin(file, r.gps.lat, r.gps.lng, 'Placed from the photo’s location. Pick the kind of sign.');
+      else placePhotoByHand(file, noLocationReason(r.why));
     });
   }
   // A photo taken just now: phones leave the location out of these, so use where the phone is standing.
@@ -873,7 +885,7 @@
       wantLocation = true;
       toast('Finding where you are standing…');
       M.locate().then((p) => dropPhotoPin(file, p.lat, p.lng, 'Placed where you are standing' + (p.accuracy > 30 ? ' (within about ' + Math.round(E.yards(p.accuracy)) + ' yd)' : '') + '. Drag the pin if it is off, then pick the kind of sign.'))
-        .catch(() => placePhotoByHand(file, 'Could not get your location. Tap the map where you took the photo.'));
+        .catch((e) => placePhotoByHand(file, (e && e.message) || 'Could not get your location.'));
     });
   }
   /* ---- add a photo: take one here, or pick one already on the phone ---- */
