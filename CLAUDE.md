@@ -79,7 +79,7 @@ Scripts load in this order in `index.html`: engine, exif, marktypes, store, weat
 
 - `node --test tests/*.test.js` (or `npm test`) runs the engine and EXIF unit tests. They must pass before packaging.
 - Run `node --check js/<file>.js` on any edited JS file.
-- For a local preview, run `python3 -m http.server 8080` (or `npx serve`) and open http://localhost:8080. Some things only behave right on a phone outdoors: GPS, compass heading, and DeviceOrientation (which needs a permission prompt on iOS).
+- For a local preview, run `npm run serve` (`scripts/serve.js`, plain Node with nothing to install) and open http://localhost:8080. It only listens on this computer. The service worker does not register in the preview pane, so offline behaviour has to be checked on the live site. Some things only behave right on a phone outdoors: GPS, compass heading, and DeviceOrientation (which needs a permission prompt on iOS).
 - Watch out for tests that depend on the time of day. Thermals depend on sun angle, so fix the forecast and date in tests.
 
 ## Data sources
