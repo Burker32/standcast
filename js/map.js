@@ -8,9 +8,10 @@
   var BASES = {
     imagery: { label: 'Satellite', url: TILE_BASE + 'USGSImageryOnly/MapServer/tile/{z}/{y}/{x}', attr: 'Imagery: <a href="https://www.usgs.gov/">U.S. Geological Survey</a>' },
     topo: { label: 'Topo', url: TILE_BASE + 'USGSTopo/MapServer/tile/{z}/{y}/{x}', attr: 'Map: <a href="https://www.usgs.gov/">U.S. Geological Survey</a>' },
-    // Missouri statewide 6-inch leaf-off photos (north 2023, south 2024) from MSDIS: bare trees, so you see the ground.
+    // Leaf-off photos: bare trees, so you see the ground. Missouri statewide 6-inch (north 2023, south 2024) from MSDIS,
+    // and Wisconsin's latest statewide leaf-off set from the DNR (see LEAF below for which is used where).
     leafoff: { label: 'Leaf-off', url: 'https://stateimagery.msdis.missouri.edu/arcgis/rest/services/Missouri_6inch_Statewide_2023_2024_Cached/ImageServer/exportImage',
-      fn: true, maxNative: 19, attr: 'Leaf-off imagery: <a href="https://msdis.missouri.edu/">MSDIS</a>, State of Missouri (2023–2024)' },
+      fn: true, maxNative: 19, attr: 'Leaf-off imagery: <a href="https://msdis.missouri.edu/">MSDIS</a> (Missouri), <a href="https://dnr.wisconsin.gov/">Wisconsin DNR</a> and WROC (Wisconsin)' },
     hybrid: { label: 'Hybrid', url: TILE_BASE + 'USGSImageryTopo/MapServer/tile/{z}/{y}/{x}', attr: 'Imagery and topo: <a href="https://www.usgs.gov/">U.S. Geological Survey</a>' }
   };
   var MAX_NATIVE = 16;
@@ -69,11 +70,24 @@
 
   // Image services (like the leaf-off photos) are asked for one Web Mercator square per map tile.
   var R = 20037508.342789244;
+  // Leaf-off photos come from each state's own service. A tile is drawn from the state it falls in; anywhere
+  // else gets the national summer photo, so the map is never blank. Boxes are rough state outlines.
+  var LEAF = [
+    { s: 35.9, n: 40.7, w: -95.9, e: -89.0, url: BASES.leafoff.url },                                    // Missouri: MSDIS 6-inch, 2023-24
+    { s: 42.4, n: 47.4, w: -93.0, e: -86.2,                                                              // Wisconsin: DNR / WROC, 2018-24
+      url: 'https://dnrmaps.wi.gov/arcgis_image/rest/services/DW_Imagery/EN_Image_Basemap_Latest_Leaf_Off_Raster_Tile/MapServer/export' }
+  ];
+  var LEAF_ELSE = TILE_BASE + 'USGSImageryOnly/MapServer/export';
+  function leafUrl(xMid, yMid) {
+    var lng = xMid / R * 180, lat = Math.atan(Math.sinh(yMid / R * Math.PI)) * 180 / Math.PI;
+    for (var i = 0; i < LEAF.length; i++) if (lat >= LEAF[i].s && lat <= LEAF[i].n && lng >= LEAF[i].w && lng <= LEAF[i].e) return LEAF[i].url;
+    return LEAF_ELSE;
+  }
   function exportUrl(key, z, x, y) {
     var res = 2 * R / (256 * Math.pow(2, z));
     var x0 = -R + x * 256 * res, y1 = R - y * 256 * res, x1 = x0 + 256 * res, y0 = y1 - 256 * res;
     var px = (window.devicePixelRatio || 1) > 1.5 ? 512 : 256;    // sharper on phone screens
-    return BASES[key].url + '?bbox=' + [x0, y0, x1, y1].map(function (v) { return v.toFixed(2); }).join(',') +
+    return (key === 'leafoff' ? leafUrl((x0 + x1) / 2, (y0 + y1) / 2) : BASES[key].url) + '?bbox=' + [x0, y0, x1, y1].map(function (v) { return v.toFixed(2); }).join(',') +
       '&bboxSR=3857&imageSR=3857&size=' + px + ',' + px + '&format=jpg&f=image';
   }
   function setBasemap(key) {

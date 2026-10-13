@@ -4,7 +4,7 @@
  *  - Map library (Leaflet, leaflet-rotate): shipped with the app in vendor/, cached on install.
  *  - Fonts from CDNs: cached the first time they load.
  *  - Forecast and elevation calls are never cached here (the app keeps its own copy). */
-const VERSION = 'v32';
+const VERSION = 'v33';
 const SHELL = 'sc-shell-' + VERSION;
 const TILES = 'sc-tiles-v1';
 const LIBS = 'sc-libs-' + VERSION;
@@ -52,7 +52,7 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  if (url.hostname === 'basemap.nationalmap.gov' || url.hostname === 'stateimagery.msdis.missouri.edu' ||
+  if (url.hostname === 'basemap.nationalmap.gov' || url.hostname === 'stateimagery.msdis.missouri.edu' || url.hostname === 'dnrmaps.wi.gov' ||
       (url.hostname === 'elevation.nationalmap.gov' && url.pathname.indexOf('exportImage') > 0) ||
       (url.hostname === 'carto.nationalmap.gov' && url.pathname.indexOf('/export') > 0)) {   // road and place-name tiles; searches are not kept
     e.respondWith(caches.open(TILES).then(async (c) => {

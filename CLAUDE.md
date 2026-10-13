@@ -11,7 +11,7 @@ A bowhunting app that answers "which stand tonight?" It models wind, thermals, s
   2. Bump `VERSION` in `sw.js`.
   3. Run `npm test`, and `node --check` on each edited JS file.
   4. Commit and push to `main`. GitHub Pages rebuilds the site by itself, usually within a minute or two.
-- **Every deploy must bump `VERSION` in `sw.js`** (currently `'v32'`). The service worker serves cache-first, so phones keep the old app until the version changes. After a deploy, the owner closes and reopens the app once.
+- **Every deploy must bump `VERSION` in `sw.js`** (currently `'v33'`). The service worker serves cache-first, so phones keep the old app until the version changes. After a deploy, the owner closes and reopens the app once.
 - The app is served from the `/standcast/` subfolder, so every path in `index.html`, `manifest.webmanifest` and `sw.js` must stay relative (no leading `/`).
 - The repo is public. `CLAUDE.local.md` and zip files are kept out by `.gitignore`. Check `git status` before committing so nothing private goes up.
 - The empty `.nojekyll` file tells GitHub Pages to serve the files as they are.
@@ -38,7 +38,7 @@ Scripts load in this order in `index.html`: engine, exif, marktypes, store, weat
 - **`js/map.js`:** Leaflet 1.9.4 plus leaflet-rotate 0.2.8, shipped in `vendor/` so the map works with no signal (CDN copies are only a fallback). Any new file in `vendor/` must be added to `FILES` in `sw.js`.
   - Basemaps:
     - USGS Imagery (Summer, NAIP leaf-on).
-    - MSDIS Missouri 6-inch leaf-off 2023–24, from an ImageServer `exportImage` call with Web Mercator bbox math per tile.
+    - Leaf-off, picked per tile by state (`LEAF` in `map.js`): MSDIS Missouri 6-inch 2023–24 (ImageServer `exportImage`), and Wisconsin DNR / WROC latest leaf-off 2018–24 (the cached `..._Raster_Tile` MapServer `export`, which answers in about 0.2 s; the plain ImageServer takes 10 s or more). Tiles outside both states fall back to the USGS summer photo. Add a state by adding a row to `LEAF` and its host to the tile cache list in `sw.js`.
     - USGS Imagery Topo (Hybrid) and USGS Topo.
   - Overlays (`OVER`): 3DEP hillshade, 3DEP 10 ft contours (CSS class `ov-contours` adds a white halo so they show on any imagery), and CropScape 2025 (WMS, EPSG:4326).
   - Also in this file:

@@ -1189,7 +1189,7 @@
     root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Reading the thermals'),
       h('p', { class: 'line' }, 'Wind and thermals are drawn apart. The long pale streaks are the wind near the ground, slowed by the trees. The orange and purple glow marks slopes where thermals are working, and the bright beads crawling across it show which way: orange climbing uphill, purple draining downhill. Beads go faint where the wind is strong enough to overpower them. Pink spinning rings are swirl, where the two fight. The green puffs leaving each stand are your scent riding all of it together.'),
       h('p', { class: 'line' }, 'Under Map layers you can show just the wind, just the thermals, or both.'),
-      h('p', { class: 'line' }, 'Map photos: Summer is USDA aerial photography with the leaves on, refreshed every few years. Leaf-off is Missouri\'s statewide winter photography (north half 2023, south half 2024) with the trees bare, so you can see ridges, benches, trails and openings under the canopy. The round map button cycles Summer, Leaf-off and Topo; Hybrid is under Map layers.'),
+      h('p', { class: 'line' }, 'Map photos: Summer is USDA aerial photography with the leaves on, refreshed every few years. Leaf-off is winter photography with the trees bare, so you can see ridges, benches, trails and openings under the canopy. It covers Missouri (2023 and 2024) and Wisconsin (2018 to 2024, by county); anywhere else it shows the summer photo. The round map button cycles Summer, Leaf-off and Topo; Hybrid is under Map layers.'),
       h('p', { class: 'line' }, 'Overlays (Map layers): Lidar terrain is USGS laser-scanned ground shape blended into the photo, so ridges, benches, saddles, ditches and old roads stand out even under timber. Crops 2025 is USDA CropScape: what was grown in each field last season (corn, soybeans, wheat, hay and so on). Each has its own strength slider and works on any base map.'),
       h('p', { class: 'line' }, 'Find a place with the magnifier at the top: type a town, lake, creek, landform or piece of public land anywhere in the country and tap a result to go there. Add a state, like “Stockton WI”, to narrow it. Coordinates such as 37.8096, -93.6250 work too. Roads and place names (Map layers) draws road lines and names over the photo maps.'),
       h('p', { class: 'line' }, 'Benches (Map layers) shades flat strips part-way up a hillside: ground that is clearly flatter than the slope above and below it. It is worked out from the lidar ground data for the area on screen, so zoom in to use it. It only knows the shape of the ground, so treat it as places worth walking, not proof deer travel there.'),
@@ -1228,7 +1228,7 @@
       h('p', { class: 'line' }, 'Deletes every stand, mark and photo on this device.'),
       confirmTwice('Erase everything', () => { S.clearAll(); ui.selStand = ui.selMark = null; data.fc = {}; toast('All data erased'); recompute(); go('list', { tab: 'stands' }); })));
     root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Data and credits'),
-      h('p', { class: 'fine' }, 'Forecast: Open-Meteo (open-meteo.com), national weather model data. Ground elevation: USGS 3D Elevation Program (lidar), with the Copernicus 90 m model as a backup. Maps: U.S. Geological Survey, The National Map; Missouri leaf-off imagery: MSDIS. Crops: USDA NASS Cropland Data Layer. Public land: USGS PAD-US. Mapping library: Leaflet with leaflet-rotate.')));
+      h('p', { class: 'fine' }, 'Forecast: Open-Meteo (open-meteo.com), national weather model data. Ground elevation: USGS 3D Elevation Program (lidar), with the Copernicus 90 m model as a backup. Maps: U.S. Geological Survey, The National Map; Missouri leaf-off imagery: MSDIS. Wisconsin leaf-off imagery: Wisconsin DNR and the Wisconsin Regional Orthophoto Consortium. Place names and roads: USGS. Crops: USDA NASS Cropland Data Layer. Public land: USGS PAD-US. Mapping library: Leaflet with leaflet-rotate.')));
     return root;
   }
 
@@ -1271,7 +1271,7 @@
       const i = CYCLE.indexOf(settings().basemap);
       const next = CYCLE[(i + 1) % CYCLE.length];
       setBase(next);
-      if (next === 'leafoff') toast('Leaf-off: bare winter trees (Missouri, 2023–24).');
+      if (next === 'leafoff') toast('Leaf-off: bare winter trees (Missouri and Wisconsin).');
     });
     pop.querySelectorAll('[data-layer]').forEach((c) => c.addEventListener('change', () => { settings().layers[c.dataset.layer] = c.checked; S.save(); if (c.dataset.layer === 'animate' && SC.flow) SC.flow.setEnabled(c.checked);
       if (c.dataset.layer === 'publand' && SC.publand) { SC.publand.setEnabled(c.checked); if (c.checked && M.zoom < 11) toast('Zoom in to see public land boundaries.'); }
