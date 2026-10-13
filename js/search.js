@@ -1,6 +1,8 @@
-/* Place search: find a town, lake, creek, landform or piece of public land by name, anywhere in the U.S.
+/* Place search: find a town, lake, creek, landform, piece of public land, road or street address by name.
  *  - Names of towns and natural features: USGS Geographic Names (GNIS), The National Map.
  *  - Public land (conservation areas, state and national forests, parks): PAD-US.
+ *  - Roads by name, near where the map is looking: USGS transportation.
+ *  - Street addresses ("100 South St, Stockton, MO"): U.S. Census Bureau geocoder.
  *  - Typed coordinates such as "37.8096, -93.6250" go straight there.
  * Free services, no key. Results near where the map is looking come first; "Stockton WI" limits it to a state. */
 (function () {
@@ -83,26 +85,90 @@
       return [].concat.apply([], lists);
     });
   }
+  /* Street addresses: the U.S. Census Bureau geocoder. It needs the town and state (or a ZIP) after the street.
+   * The Census service does not allow a normal cross-site request, so it is loaded the older way, as a script
+   * that calls us back. That runs code from census.gov in the page, which is why no other host is loaded like this. */
+  var CENSUS = 'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress';
+  function looksLikeAddress(text) { return /^\s*\d+[A-Za-z]?\s+[A-Za-z0-9]/.test(text) && /[A-Za-z]{2}/.test(text); }
+  function titleCase(s) { return s.toLowerCase().replace(/\b[a-z]/g, function (c) { return c.toUpperCase(); }).replace(/, ([A-Za-z]{2}),/, function (m, st) { return ', ' + st.toUpperCase() + ','; }); }
+  function address(text) {
+    return new Promise(function (resolve) {
+      var cb = '__scAddr' + Date.now() + Math.floor(Math.random() * 1e4), s = document.createElement('script'), over = false;
+      function finish(list) { if (over) return; over = true; clearTimeout(timer); try { delete window[cb]; } catch (e) { window[cb] = undefined; } s.remove(); resolve(list); }
+      var timer = setTimeout(function () { finish([]); }, 12000);
+      window[cb] = function (d) {
+        var m = (d && d.result && d.result.addressMatches) || [];
+        finish(m.slice(0, 5).map(function (a) {
+          return { name: titleCase(a.matchedAddress), kind: 'Address', where: '', lat: a.coordinates.y, lng: a.coordinates.x, exact: true };
+        }));
+      };
+      s.onerror = function () { finish([]); };
+      s.src = CENSUS + '?address=' + encodeURIComponent(text) + '&benchmark=Public_AR_Current&format=jsonp&callback=' + cb;
+      document.head.appendChild(s);
+    });
+  }
+  /* Road names: USGS transportation lines (from Census TIGER). Road names repeat in every county, so only roads
+   * within about 25 miles of where the map is looking are searched. One result per road name per county. */
+  var ROADS = 'https://carto.nationalmap.gov/arcgis/rest/services/transportation/MapServer';
+  var ROAD_LAYERS = [30, 31, 32, 35];   // secondary highways, connecting roads, local roads, 4WD roads
+  function roads(term, center) {
+    if (!center || term.length < 3) return Promise.resolve([]);
+    var box = { s: center.lat - 0.36, n: center.lat + 0.36, w: center.lng - 0.46, e: center.lng + 0.46 };
+    var where = "UPPER(name) LIKE '%" + sql(term) + "%'";
+    return Promise.all(ROAD_LAYERS.map(function (l) {
+      return getJson(ROADS + '/' + l + '/query?where=' + encodeURIComponent(where) + boxParam(box) +
+        '&outFields=name,stco_fipscode&returnGeometry=true&outSR=4326&geometryPrecision=5&maxAllowableOffset=0.0003&resultRecordCount=120&f=json')
+        .then(function (j) { return j.features || []; }, function () { return []; });
+    })).then(function (lists) {
+      var by = {}, E = SC.engine;
+      [].concat.apply([], lists).forEach(function (f) {
+        var a = f.attributes, key = a.name + '|' + a.stco_fipscode;
+        var r = by[key] || (by[key] = { name: a.name, kind: 'Road', where: '', best: Infinity, box: { s: 90, n: -90, w: 180, e: -180 } });
+        ((f.geometry && f.geometry.paths) || []).forEach(function (path) {
+          path.forEach(function (p) {
+            if (p[0] < r.box.w) r.box.w = p[0]; if (p[0] > r.box.e) r.box.e = p[0]; if (p[1] < r.box.s) r.box.s = p[1]; if (p[1] > r.box.n) r.box.n = p[1];
+            var d = E.distanceM(center.lat, center.lng, p[1], p[0]);
+            if (d < r.best) { r.best = d; r.lat = p[1]; r.lng = p[0]; }      // go to the part of the road nearest you
+          });
+        });
+      });
+      return Object.keys(by).map(function (k) {
+        var r = by[k];
+        if (r.lat == null) return null;
+        if (r.box.n - r.box.s > 0.06 || r.box.e - r.box.w > 0.08) delete r.box;   // a long road: show the nearest stretch, not all of it
+        return r;
+      }).filter(Boolean);
+    });
+  }
+
   // center: { lat, lng } the map is looking at. Resolves to up to 25 results, best match and nearest first.
-  function lookup(text, center) {
+  function lookup(text, center, more) {
     var q = parse(text);
     if (q.coords) return Promise.resolve([{ name: q.coords.lat.toFixed(5) + ', ' + q.coords.lng.toFixed(5), kind: 'Coordinates', where: '', lat: q.coords.lat, lng: q.coords.lng }]);
     if (!q.term || q.term.length < 3) return Promise.resolve([]);
     var near = q.state || !center ? null : { s: center.lat - 2.5, n: center.lat + 2.5, w: center.lng - 3.2, e: center.lng + 3.2 };
-    return everything(q, near).then(function (list) {
-      return list.length || !near ? list : everything(q, null);          // nothing within a few hours' drive: look everywhere
-    }).then(function (list) {
+    var roadTerm = q.term.split(',')[0].replace(/^\d+[A-Z]?\s+/, '').trim();
+    // a house number first: treat it as an address. Otherwise look for named places.
+    var quick = looksLikeAddress(text) ? address(text)
+      : everything(q, near).then(function (list) { return list.length || !near ? list : everything(q, null); });   // nothing within a few hours' drive: look everywhere
+    // Road names take a few seconds, so they are added to the list when they arrive (through `more`).
+    if (typeof more === 'function') {
+      var slow = roads(roadTerm, center).catch(function () { return []; });
+      quick.then(function (list) { return slow.then(function (rd) { more(order(list.concat(rd))); }); }).catch(function () { slow.then(function (rd) { more(order(rd)); }); });
+    }
+    return quick.then(order);
+    function order(list) {
       var E = SC.engine;
       list.forEach(function (r) {
         var n = r.name.toUpperCase();
-        r.rank = n === q.term ? 0 : n.indexOf(q.term) === 0 ? 1 : 2;
+        r.rank = r.exact ? -4 : n === q.term ? 0 : n.indexOf(q.term) === 0 ? 1 : 2;
         r.distM = center ? E.distanceM(center.lat, center.lng, r.lat, r.lng) : 0;
       });
       // nearer is better, a closer name match is worth about 25 miles, and a town a little more
       list.forEach(function (r) { r.score = r.distM / 1609.34 + r.rank * 25 - (r.town ? 15 : 0); });
       list.sort(function (a, b) { return a.score - b.score; });
       return list.slice(0, 25);
-    });
+    }
   }
 
   SC.search = { lookup: lookup, parse: parse };

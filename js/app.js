@@ -1191,7 +1191,8 @@
       h('p', { class: 'line' }, 'Under Map layers you can show just the wind, just the thermals, or both.'),
       h('p', { class: 'line' }, 'Map photos: Summer is USDA aerial photography with the leaves on, refreshed every few years. Leaf-off is winter photography with the trees bare, so you can see ridges, benches, trails and openings under the canopy. It covers Missouri (2023 and 2024) and Wisconsin (2018 to 2024, by county); anywhere else it shows the summer photo. The round map button cycles Summer, Leaf-off and Topo; Hybrid is under Map layers.'),
       h('p', { class: 'line' }, 'Overlays (Map layers): Lidar terrain is USGS laser-scanned ground shape blended into the photo, so ridges, benches, saddles, ditches and old roads stand out even under timber. Crops 2025 is USDA CropScape: what was grown in each field last season (corn, soybeans, wheat, hay and so on). Each has its own strength slider and works on any base map.'),
-      h('p', { class: 'line' }, 'Find a place with the magnifier at the top: type a town, lake, creek, landform or piece of public land anywhere in the country and tap a result to go there. Add a state, like “Stockton WI”, to narrow it. Coordinates such as 37.8096, -93.6250 work too. Roads and place names (Map layers) draws road lines and names over the photo maps.'),
+      h('p', { class: 'line' }, 'Find a place with the magnifier at the top: type a town, lake, creek, landform or piece of public land anywhere in the country and tap a result to go there. Add a state, like “Stockton WI”, to narrow it. Coordinates such as 37.8096, -93.6250 work too. For a street address, give the town and state or a ZIP, like “100 South St, Stockton, MO”. Road names are searched within about 25 miles of where the map is looking.'),
+      h('p', { class: 'line' }, 'Roads and trails (Map layers) draws lines over any map: a solid line is a road, long dashes are a 4WD or closed road, and dots are a trail. Tap a line for its name. It comes from national road and trail records, so many woods roads and most unofficial trails are missing. Road and place names adds the name labels.'),
       h('p', { class: 'line' }, 'Benches (Map layers) shades flat strips part-way up a hillside: ground that is clearly flatter than the slope above and below it. It is worked out from the lidar ground data for the area on screen, so zoom in to use it. It only knows the shape of the ground, so treat it as places worth walking, not proof deer travel there.'),
       h('p', { class: 'line' }, 'Saddles and Funnels (Map layers) show as small dark badges with a green rim, only the strongest few in view so the map stays readable. A round badge is a saddle: a low gap in a ridge. A square badge is a funnel: easy walking squeezed between steep ground or water. Tap a badge to see what it found. Like benches, they come from the shape of the ground only.'),
       h('p', { class: 'line' }, 'Stand slopes and the thermal flow use the same lidar ground data (1 m where available) for a much closer read of each hillside than before.'),
@@ -1254,6 +1255,7 @@
       const st = settings(); st.overlays = st.overlays || {}; st.overlays[c.dataset.ov] = c.checked; S.save(); applyOverlays(); syncLayerUi();
       if (c.checked && (c.dataset.ov === 'hillshade' || c.dataset.ov === 'contours')) toast((c.dataset.ov === 'contours' ? 'Contours' : 'Lidar terrain') + ' draw on demand, so give it a few seconds the first time.');
       if (c.checked && c.dataset.ov === 'contours' && M.zoom < 13) toast('Zoom in closer to see the 10 ft contour lines.');
+      if (c.checked && c.dataset.ov === 'roadlines') toast(M.zoom < SC.roads.MIN_ZOOM ? 'Zoom in closer to see roads and trails.' : 'Loading roads and trails. Tap a line for its name.');
       if (c.checked && c.dataset.ov === 'labels') toast(M.zoom < 9 ? 'Zoom in to see roads and place names.' : 'Roads and names draw on demand, so give them a few seconds.');
       if (c.checked && c.dataset.ov === 'benches') loadBenches(true);
       if (c.checked && (c.dataset.ov === 'saddles' || c.dataset.ov === 'funnels')) loadSpots(true);
@@ -1310,15 +1312,20 @@
   function runSearch() {
     clearTimeout(searchTimer);
     const text = $('search-input').value.trim(), note = $('search-note'), list = $('search-results'), seq = ++searchSeq;
-    if (text.length < 3) { list.replaceChildren(); note.textContent = 'Try a town, a lake, a creek or a conservation area. Add a state to narrow it, like “Stockton WI”.'; return; }
+    if (text.length < 3) { list.replaceChildren(); note.textContent = 'Try a town, lake, creek, road, conservation area or address. Add a state to narrow it, like “Stockton WI”.'; return; }
     note.textContent = 'Searching…';
-    SC.search.lookup(text, M.center()).then((res) => {
+    const show = (res, roadsDone) => {
       if (seq !== searchSeq) return;
-      note.textContent = res.length ? 'Nearest and best matches first.' : 'Nothing found by that name. Check the spelling, or add a state.';
+      note.textContent = res.length ? 'Nearest and best matches first.' + (roadsDone ? '' : ' Still checking road names…')
+        : roadsDone ? 'Nothing found by that name. Check the spelling, or add a state. An address needs its town and state.' : 'Still checking road names…';
       list.replaceChildren.apply(list, res.map((r) => h('button', { class: 'search-hit', type: 'button', onclick: () => goToPlace(r) },
         h('b', null, r.name),
         h('span', null, [r.kind, r.where, r.distM > 1609 ? Math.round(r.distM / 1609.34).toLocaleString() + ' mi away' : null].filter(Boolean).join('  ·  ')))));
-    }).catch((e) => { if (seq === searchSeq) { list.replaceChildren(); note.textContent = e.message || 'Search failed. Check your signal.'; } });
+    };
+    // places come back in about a second; road names follow a few seconds later and are merged into the list
+    let roadsIn = false;
+    SC.search.lookup(text, M.center(), (res) => { roadsIn = true; show(res, true); }).then((res) => { if (!roadsIn) show(res, false); })
+      .catch((e) => { if (seq === searchSeq) { list.replaceChildren(); note.textContent = e.message || 'Search failed. Check your signal.'; } });
   }
   function wireSearch() {
     $('btn-search').appendChild(icon('search', 22));
@@ -1344,6 +1351,7 @@
   function applyOverlays() {
     const on = settings().overlays || {};
     ['hillshade', 'contours', 'crops', 'labels'].forEach((n) => M.setOverlay(n, !!on[n], ovOpacity(n)));
+    if (SC.roads) SC.roads.setEnabled(!!on.roadlines);
     loadBenches(); loadSpots();
   }
   function setBase(key) { settings().basemap = key; S.save(); M.setBasemap(key); syncLayerUi(); }
@@ -1517,6 +1525,19 @@
       });
       SC.publand.setEnabled(settings().layers.publand !== false);
     } } catch (e) { console.warn('public land layer off', e); }
+    try { if (SC.roads && M.leaflet) {
+      SC.roads.attach(M.leaflet, {
+        onTap: (info, ll) => {
+          if (ui.measure && ll) return addMeasurePoint(ll.lat, ll.lng);
+          if (ui.placing && ll) return placeAt(ll.lat, ll.lng);
+          if (tapCancels()) return;
+          const what = info.kind === 'trail' ? [info.name || 'Trail (no name listed)', info.number ? 'no. ' + info.number : null, info.surface ? info.surface.toLowerCase() + ' surface' : null].filter(Boolean).join(', ')
+            : (info.name || 'No name listed') + ' (' + info.label.toLowerCase() + ')';
+          toast(what);
+        },
+        onStatus: (st) => { if (st === 'error') toast('Could not load roads and trails. Check your signal.'); }
+      });
+    } } catch (e) { console.warn('roads layer off', e); }
     try { if (SC.flow && M.leaflet) { SC.flow.attach(M.leaflet); SC.flow.setMode(settings().airMode || 'both'); SC.flow.setEnabled(settings().layers.animate !== false); } }
     catch (e) { console.warn('moving air off', e); }
     if (M.canRotate) {
