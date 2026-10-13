@@ -4,7 +4,7 @@
  *  - Map library (Leaflet, leaflet-rotate): shipped with the app in vendor/, cached on install.
  *  - Fonts from CDNs: cached the first time they load.
  *  - Forecast and elevation calls are never cached here (the app keeps its own copy). */
-const VERSION = 'v36';
+const VERSION = 'v37';
 const SHELL = 'sc-shell-' + VERSION;
 const TILES = 'sc-tiles-v1';
 const LIBS = 'sc-libs-' + VERSION;
@@ -28,7 +28,11 @@ self.addEventListener('activate', (e) => {
   )).then(() => self.clients.claim()));
 });
 
+// Listing every saved tile is slow, so the store is only checked for size once every 60 new tiles.
+let sinceTrim = 0;
 async function trimTiles() {
+  if (++sinceTrim < 60) return;
+  sinceTrim = 0;
   const c = await caches.open(TILES), keys = await c.keys();
   if (keys.length > MAX_TILES) await Promise.all(keys.slice(0, keys.length - MAX_TILES).map((k) => c.delete(k)));
 }

@@ -1294,6 +1294,14 @@
     document.addEventListener('visibilitychange', () => { if (!document.hidden && stands().length && data.at && Date.now() - data.at > W.TTL) refresh(); });
     window.addEventListener('online', () => { if (stands().length) refresh(true); });
   }
+  // A tap on a road or trail line (when that layer is on and zoomed in) names it. True if there was one there.
+  function roadAt(ll) {
+    const info = SC.roads && ll ? SC.roads.pick(ll) : null;
+    if (!info) return false;
+    toast(info.kind === 'trail' ? [info.name || 'Trail (no name listed)', info.number ? 'no. ' + info.number : null, info.surface ? info.surface.toLowerCase() + ' surface' : null].filter(Boolean).join(', ')
+      : (info.name || 'No name listed') + ' (' + info.label.toLowerCase() + ')');
+    return true;
+  }
   /* ---- place search ---- */
   let searchTimer = 0, searchSeq = 0;
   function closeSearch() { $('search').hidden = true; $('btn-search').setAttribute('aria-expanded', 'false'); }
@@ -1510,7 +1518,7 @@
     let saveTimer = null;
     M.init('map', {
       view: settings().view, basemap: settings().basemap,
-      onTap: (ll) => { if (ui.measure) addMeasurePoint(ll.lat, ll.lng); else if (ui.placing) placeAt(ll.lat, ll.lng); else tapCancels(); },
+      onTap: (ll) => { if (ui.measure) addMeasurePoint(ll.lat, ll.lng); else if (ui.placing) placeAt(ll.lat, ll.lng); else if (!tapCancels()) roadAt(ll); },
       onHold: (ll) => holdAt(ll.lat, ll.lng),
       onSelectStand: (id) => { if (ui.measure) { const s = S.getStand(id); if (s) addMeasurePoint(s.lat, s.lng); } else if (!ui.placing) selectStand(id); },
       onSelectMark: (id) => { if (ui.measure) { const m = S.getMark(id); if (m) addMeasurePoint(m.lat, m.lng); } else if (!ui.placing) selectMark(id); },
@@ -1522,7 +1530,7 @@
     });
     try { if (SC.publand && M.leaflet) {
       SC.publand.attach(M.leaflet, {
-        onTap: (info, ll) => { if (ui.measure && ll) addMeasurePoint(ll.lat, ll.lng); else if (ui.placing && ll) placeAt(ll.lat, ll.lng); else if (!tapCancels()) showLand(info); },
+        onTap: (info, ll) => { if (ui.measure && ll) addMeasurePoint(ll.lat, ll.lng); else if (ui.placing && ll) placeAt(ll.lat, ll.lng); else if (!tapCancels() && !roadAt(ll)) showLand(info); },
         onStatus: (st) => { if (st === 'error') toast('Could not load public land. Check your signal.'); }
       });
       SC.publand.setEnabled(settings().layers.publand !== false);
@@ -1532,14 +1540,6 @@
     catch (e) { console.warn('map names off', e); }
     try { if (SC.roads && M.leaflet) {
       SC.roads.attach(M.leaflet, {
-        onTap: (info, ll) => {
-          if (ui.measure && ll) return addMeasurePoint(ll.lat, ll.lng);
-          if (ui.placing && ll) return placeAt(ll.lat, ll.lng);
-          if (tapCancels()) return;
-          const what = info.kind === 'trail' ? [info.name || 'Trail (no name listed)', info.number ? 'no. ' + info.number : null, info.surface ? info.surface.toLowerCase() + ' surface' : null].filter(Boolean).join(', ')
-            : (info.name || 'No name listed') + ' (' + info.label.toLowerCase() + ')';
-          toast(what);
-        },
         onStatus: (st) => { if (st === 'error') toast('Could not load roads and trails. Check your signal.'); }
       });
     } } catch (e) { console.warn('roads layer off', e); }

@@ -86,8 +86,11 @@
   function exportUrl(key, z, x, y) {
     var res = 2 * R / (256 * Math.pow(2, z));
     var x0 = -R + x * 256 * res, y1 = R - y * 256 * res, x1 = x0 + 256 * res, y0 = y1 - 256 * res;
-    var px = (window.devicePixelRatio || 1) > 1.5 ? 512 : 256;    // sharper on phone screens
-    return (key === 'leafoff' ? leafUrl((x0 + x1) / 2, (y0 + y1) / 2) : BASES[key].url) + '?bbox=' + [x0, y0, x1, y1].map(function (v) { return v.toFixed(2); }).join(',') +
+    var sharp = (window.devicePixelRatio || 1) > 1.5, url = key === 'leafoff' ? leafUrl((x0 + x1) / 2, (y0 + y1) / 2) : BASES[key].url;
+    // Picture size per tile. The Missouri service answers a 256 or 320 pixel square in about a tenth of a second
+    // but takes a full second for 512 (measured), so phones get 320 there: far faster, barely softer.
+    var px = !sharp ? 256 : url === BASES.leafoff.url ? 320 : 384;
+    return url + '?bbox=' + [x0, y0, x1, y1].map(function (v) { return v.toFixed(2); }).join(',') +
       '&bboxSR=3857&imageSR=3857&size=' + px + ',' + px + '&format=jpg&f=image';
   }
   function setBasemap(key) {
@@ -96,7 +99,10 @@
     baseKey = key;
     var b = BASES[key];
     baseLayer = L.tileLayer(b.fn ? b.url + '?{z}/{x}/{y}' : b.url, {
-      maxNativeZoom: b.maxNative || MAX_NATIVE, maxZoom: 19, attribution: b.attr, crossOrigin: true, className: 'base-' + key
+      maxNativeZoom: b.maxNative || MAX_NATIVE, maxZoom: 19, attribution: b.attr, crossOrigin: true, className: 'base-' + key,
+      // Phones normally wait until a drag ends before asking for new tiles. Asking while you drag, and keeping
+      // a wider ring of tiles around the screen, means less grey when you stop.
+      updateWhenIdle: false, updateInterval: 120, keepBuffer: 3
     });
     if (b.fn) baseLayer.getTileUrl = function (c) { return exportUrl(key, c.z, c.x, c.y); };
     baseLayer.addTo(map);
