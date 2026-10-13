@@ -4,13 +4,13 @@
  *  - Map library (Leaflet, leaflet-rotate): shipped with the app in vendor/, cached on install.
  *  - Fonts from CDNs: cached the first time they load.
  *  - Forecast and elevation calls are never cached here (the app keeps its own copy). */
-const VERSION = 'v31';
+const VERSION = 'v32';
 const SHELL = 'sc-shell-' + VERSION;
 const TILES = 'sc-tiles-v1';
 const LIBS = 'sc-libs-' + VERSION;
 const FILES = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest',
-  'js/engine.js', 'js/exif.js', 'js/marktypes.js', 'js/store.js', 'js/weather.js', 'js/map.js', 'js/flow.js', 'js/publand.js', 'js/app.js',
+  'js/engine.js', 'js/exif.js', 'js/marktypes.js', 'js/store.js', 'js/weather.js', 'js/map.js', 'js/flow.js', 'js/publand.js', 'js/search.js', 'js/app.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
   'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css', 'vendor/leaflet-rotate/leaflet-rotate-src.js',
   'vendor/leaflet/images/layers.png', 'vendor/leaflet/images/layers-2x.png',
@@ -53,7 +53,8 @@ self.addEventListener('fetch', (e) => {
   }
 
   if (url.hostname === 'basemap.nationalmap.gov' || url.hostname === 'stateimagery.msdis.missouri.edu' ||
-      (url.hostname === 'elevation.nationalmap.gov' && url.pathname.indexOf('exportImage') > 0)) {
+      (url.hostname === 'elevation.nationalmap.gov' && url.pathname.indexOf('exportImage') > 0) ||
+      (url.hostname === 'carto.nationalmap.gov' && url.pathname.indexOf('/export') > 0)) {   // road and place-name tiles; searches are not kept
     e.respondWith(caches.open(TILES).then(async (c) => {
       const hit = await c.match(req.url);
       if (hit) return hit;

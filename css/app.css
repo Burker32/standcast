@@ -104,6 +104,25 @@ h2, h3, p { margin: 0; }
   display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 16px; background: var(--surface);
   border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(0, 0, 0, .3);
 }
+/* place search: drops down under the top bar */
+.searchbox {
+  position: absolute; z-index: 750; left: 12px; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 62px); max-width: 460px; margin-left: auto;
+  display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 16px; background: var(--surface);
+  border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(0, 0, 0, .3); max-height: calc(100% - 150px);
+}
+.search-row { display: flex; align-items: center; gap: 6px; }
+.search-row input { flex: 1; min-width: 0; font-size: 16px; }   /* 16px stops iPhones zooming the page on focus */
+.search-results { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
+.search-results:empty { display: none; }
+.search-hit { display: flex; flex-direction: column; gap: 1px; width: 100%; text-align: left; padding: 9px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); }
+.search-hit b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-hit span { font-size: 13px; color: var(--dim); }
+.found-wrap { background: none; border: 0; }
+.found { position: relative; width: 22px; height: 22px; border-radius: 50%; background: #e0412f; border: 3px solid #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, .6); }
+.found span { position: absolute; left: 26px; top: -2px; white-space: nowrap; padding: 2px 8px; border-radius: 8px; background: rgba(10, 14, 11, .85); color: #fff; font: 700 13px/1.25 var(--body); }
+.sw-labels { background: linear-gradient(90deg, #fff 0 45%, #1a1a1a 45% 55%, #fff 55%) !important; border: 1px solid var(--line); }
+@media (max-width: 365px) { .brand-name { display: none; } .brand { padding-right: 10px; } }
+@media (min-width: 960px) { .searchbox { left: auto; right: 14px; width: 420px; } }
 .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 12px; background: var(--surface-2); }
 .seg button { min-height: 38px; border: 0; border-radius: 9px; background: transparent; font-weight: 700; }
 .seg button.on { background: var(--wind); color: var(--on-accent); }

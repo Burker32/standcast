@@ -102,6 +102,7 @@
   };
   var overLayers = {};
   var OV_TILE = 512;   // tile size of the hillshade and contour layers
+  var CARTO = 'https://carto.nationalmap.gov/arcgis/rest/services/';
   function depUrl(name, z, x, y, px, fmt) {
     // These layers use 512 px tiles, so each tile covers twice the ground of a normal 256 px tile at the same zoom.
     var span = 2 * R / Math.pow(2, z) * (OV_TILE / 256);
@@ -124,6 +125,21 @@
       lay = L.tileLayer(OVER.contours.url + '?{z}/{x}/{y}', { tileSize: OV_TILE, zoomOffset: -1, minZoom: 13, maxNativeZoom: 17, maxZoom: 19, opacity: opacity,
         crossOrigin: true, className: 'ov-contours', attribution: OVER.contours.attr, zIndex: 6 });
       lay.getTileUrl = function (c) { return depUrl('contours', c.z, c.x, c.y, 512, 'png'); };
+    } else if (name === 'labels') {
+      // roads and place names drawn by USGS over whatever photo is showing (the Summer and Leaf-off photos have none)
+      var px = (window.devicePixelRatio || 1) > 1.5 ? 1024 : 512;
+      var part = function (svc, zi) {
+        var tl = L.tileLayer(CARTO + svc + '?{z}/{x}/{y}', { tileSize: OV_TILE, zoomOffset: -1, minZoom: 9, maxZoom: 19, opacity: opacity, crossOrigin: true,
+          className: 'ov-labels', attribution: 'Roads and names: <a href="https://www.usgs.gov/">U.S. Geological Survey</a>', zIndex: zi });
+        tl.getTileUrl = function (c) {
+          var span = 2 * R / Math.pow(2, c.z) * (OV_TILE / 256), x0 = -R + c.x * span, y1 = R - c.y * span;
+          return CARTO + svc + '/MapServer/export?bbox=' + [x0, y1 - span, x0 + span, y1].map(function (v) { return v.toFixed(2); }).join(',') +
+            '&bboxSR=3857&imageSR=3857&size=' + px + ',' + px + '&dpi=' + Math.round(96 * px / OV_TILE) + '&format=png32&transparent=true&f=image';
+        };
+        return tl;
+      };
+      lay = L.layerGroup([part('transportation', 7), part('geonames', 8)]);
+      lay.setOpacity = function (o) { lay.eachLayer(function (l) { l.setOpacity(o); }); };
     } else if (name === 'crops') {
       if (!L.tileLayer.wms || !L.CRS) return;
       if (!map.getPane('cropPane')) { var cp = map.createPane('cropPane', map._rotatePane || undefined); cp.style.zIndex = 300; cp.style.pointerEvents = 'none'; }
@@ -351,6 +367,19 @@
   }
   function center() { var c = map.getCenter(); return { lat: c.lat, lng: c.lng }; }
   function setPlacing(on) { map.getContainer().classList.toggle('placing', !!on); }
+  // A red dot with a name for a place found by search. It stays until the next search or until it is tapped.
+  var foundPin = null;
+  function setFound(p) {
+    if (foundPin) { map.removeLayer(foundPin); foundPin = null; }
+    if (!p) return;
+    var node = el('div', 'found');
+    node.appendChild(el('span', null, p.name));
+    foundPin = L.marker([p.lat, p.lng], { icon: L.divIcon({ className: 'found-wrap', html: node, iconSize: [22, 22], iconAnchor: [11, 11] }), keyboard: false, zIndexOffset: 1700 }).addTo(map);
+    foundPin.on('click', function (e) { L.DomEvent.stopPropagation(e); setFound(null); });
+  }
+  function fitBox(b, padBottom) {
+    map.fitBounds([[b.s, b.w], [b.n, b.e]], { paddingTopLeft: [20, 70], paddingBottomRight: [20, (padBottom || 0) + 20], maxZoom: 16, animate: true });
+  }
   // A temporary pin for the spot you pressed and held, shown while you choose what goes there.
   var pendingPin = null;
   function setPending(p) {
@@ -486,6 +515,6 @@
   SC.map = {
     BASES: BASES, init: init, setBasemap: setBasemap, render: render, renderField: renderField, bounds: bounds, flyTo: flyTo, fitPoints: fitPoints,
     center: center, setPlacing: setPlacing, invalidate: invalidate, locate: locate, watch: watch, unwatch: unwatch, watching: watching, cacheArea: cacheArea,
-    panByPixels: panByPixels, setPending: setPending, renderBenches: renderBenches, setBenchOpacity: setBenchOpacity, renderSpots: renderSpots, renderMeasure: renderMeasure, setOverlay: setOverlay, OVER: OVER, get leaflet() { return map; }, bearing: bearing, setBearing: setBearing, setFollow: setFollow, setHeading: setHeading, get following() { return follow; }, get lastFix() { return lastFix; }, get canRotate() { return !!map.setBearing; }, get basemap() { return baseKey; }, get zoom() { return map.getZoom(); }
+    panByPixels: panByPixels, setPending: setPending, setFound: setFound, fitBox: fitBox, renderBenches: renderBenches, setBenchOpacity: setBenchOpacity, renderSpots: renderSpots, renderMeasure: renderMeasure, setOverlay: setOverlay, OVER: OVER, get leaflet() { return map; }, bearing: bearing, setBearing: setBearing, setFollow: setFollow, setHeading: setHeading, get following() { return follow; }, get lastFix() { return lastFix; }, get canRotate() { return !!map.setBearing; }, get basemap() { return baseKey; }, get zoom() { return map.getZoom(); }
   };
 })();

@@ -41,6 +41,7 @@
     guide: 'M12 3 a9 9 0 1 0 0.01 0 M12 11 v6 M12 7 v.5',
     trash: 'M5 7 h14 M9 7 V4 h6 v3 M7 7 l1 13 h8 l1-13',
     photo: 'M4 8 H8 L10 6 H14 L16 8 H20 V19 H4 Z M12 10.5 a3 3 0 1 0 0.01 0',
+    search: 'M10.5 4 a6.5 6.5 0 1 0 0.01 0 M15.5 15.5 L20.5 20.5',
     photos: 'M3 7 H17 V19 H3 Z M7 7 V4 H21 V16 H17 M5.5 16.5 l3.5-4 3 3 1.5-1.5 2 2.5',
     refresh: 'M20 11 a8 8 0 1 0 -2.3 5.7 M20 4 v7 h-7',
     ruler: 'M3 17 L17 3 L21 7 L7 21 Z M7 13 l2 2 M10 10 l2 2 M13 7 l2 2',
@@ -1190,6 +1191,7 @@
       h('p', { class: 'line' }, 'Under Map layers you can show just the wind, just the thermals, or both.'),
       h('p', { class: 'line' }, 'Map photos: Summer is USDA aerial photography with the leaves on, refreshed every few years. Leaf-off is Missouri\'s statewide winter photography (north half 2023, south half 2024) with the trees bare, so you can see ridges, benches, trails and openings under the canopy. The round map button cycles Summer, Leaf-off and Topo; Hybrid is under Map layers.'),
       h('p', { class: 'line' }, 'Overlays (Map layers): Lidar terrain is USGS laser-scanned ground shape blended into the photo, so ridges, benches, saddles, ditches and old roads stand out even under timber. Crops 2025 is USDA CropScape: what was grown in each field last season (corn, soybeans, wheat, hay and so on). Each has its own strength slider and works on any base map.'),
+      h('p', { class: 'line' }, 'Find a place with the magnifier at the top: type a town, lake, creek, landform or piece of public land anywhere in the country and tap a result to go there. Add a state, like “Stockton WI”, to narrow it. Coordinates such as 37.8096, -93.6250 work too. Roads and place names (Map layers) draws road lines and names over the photo maps.'),
       h('p', { class: 'line' }, 'Benches (Map layers) shades flat strips part-way up a hillside: ground that is clearly flatter than the slope above and below it. It is worked out from the lidar ground data for the area on screen, so zoom in to use it. It only knows the shape of the ground, so treat it as places worth walking, not proof deer travel there.'),
       h('p', { class: 'line' }, 'Saddles and Funnels (Map layers) show as small dark badges with a green rim, only the strongest few in view so the map stays readable. A round badge is a saddle: a low gap in a ridge. A square badge is a funnel: easy walking squeezed between steep ground or water. Tap a badge to see what it found. Like benches, they come from the shape of the ground only.'),
       h('p', { class: 'line' }, 'Stand slopes and the thermal flow use the same lidar ground data (1 m where available) for a much closer read of each hillside than before.'),
@@ -1245,13 +1247,14 @@
     $('banner-locate').addEventListener('click', useMyLocation);
     $('btn-locate').addEventListener('click', myLocationButton);
     const pop = $('layers');
-    $('btn-layers').addEventListener('click', () => { pop.hidden = !pop.hidden; $('btn-layers').setAttribute('aria-expanded', String(!pop.hidden)); });
+    $('btn-layers').addEventListener('click', () => { closeSearch(); pop.hidden = !pop.hidden; $('btn-layers').setAttribute('aria-expanded', String(!pop.hidden)); });
     document.addEventListener('click', (e) => { if (!pop.hidden && !pop.contains(e.target) && !$('btn-layers').contains(e.target)) { pop.hidden = true; $('btn-layers').setAttribute('aria-expanded', 'false'); } });
     pop.querySelectorAll('[data-base]').forEach((b) => b.addEventListener('click', () => setBase(b.dataset.base)));
     pop.querySelectorAll('[data-ov]').forEach((c) => c.addEventListener('change', () => {
       const st = settings(); st.overlays = st.overlays || {}; st.overlays[c.dataset.ov] = c.checked; S.save(); applyOverlays(); syncLayerUi();
       if (c.checked && (c.dataset.ov === 'hillshade' || c.dataset.ov === 'contours')) toast((c.dataset.ov === 'contours' ? 'Contours' : 'Lidar terrain') + ' draw on demand, so give it a few seconds the first time.');
       if (c.checked && c.dataset.ov === 'contours' && M.zoom < 13) toast('Zoom in closer to see the 10 ft contour lines.');
+      if (c.checked && c.dataset.ov === 'labels') toast(M.zoom < 9 ? 'Zoom in to see roads and place names.' : 'Roads and names draw on demand, so give them a few seconds.');
       if (c.checked && c.dataset.ov === 'benches') loadBenches(true);
       if (c.checked && (c.dataset.ov === 'saddles' || c.dataset.ov === 'funnels')) loadSpots(true);
       if (c.checked && c.dataset.ov === 'crops' && M.zoom > 16) toast('Crop map cells are 30 m, so it looks blocky up close.');
@@ -1288,6 +1291,43 @@
     document.addEventListener('visibilitychange', () => { if (!document.hidden && stands().length && data.at && Date.now() - data.at > W.TTL) refresh(); });
     window.addEventListener('online', () => { if (stands().length) refresh(true); });
   }
+  /* ---- place search ---- */
+  let searchTimer = 0, searchSeq = 0;
+  function closeSearch() { $('search').hidden = true; $('btn-search').setAttribute('aria-expanded', 'false'); }
+  function openSearch() {
+    $('layers').hidden = true; $('landcard').hidden = true;
+    $('search').hidden = false; $('btn-search').setAttribute('aria-expanded', 'true');
+    const inp = $('search-input'); inp.focus(); inp.select();
+  }
+  function goToPlace(r) {
+    closeSearch();
+    if (isMobile()) setSheet('peek');
+    const pad = isMobile() ? $('sheet').offsetHeight : 0;
+    if (r.box) M.fitBox(r.box, pad); else M.flyTo(r.lat, r.lng, r.town ? 13.5 : 15.5, pad);
+    M.setFound({ lat: r.lat, lng: r.lng, name: r.name });
+    toast(r.name + '. Tap the red dot to clear it.');
+  }
+  function runSearch() {
+    clearTimeout(searchTimer);
+    const text = $('search-input').value.trim(), note = $('search-note'), list = $('search-results'), seq = ++searchSeq;
+    if (text.length < 3) { list.replaceChildren(); note.textContent = 'Try a town, a lake, a creek or a conservation area. Add a state to narrow it, like “Stockton WI”.'; return; }
+    note.textContent = 'Searching…';
+    SC.search.lookup(text, M.center()).then((res) => {
+      if (seq !== searchSeq) return;
+      note.textContent = res.length ? 'Nearest and best matches first.' : 'Nothing found by that name. Check the spelling, or add a state.';
+      list.replaceChildren.apply(list, res.map((r) => h('button', { class: 'search-hit', type: 'button', onclick: () => goToPlace(r) },
+        h('b', null, r.name),
+        h('span', null, [r.kind, r.where, r.distM > 1609 ? Math.round(r.distM / 1609.34).toLocaleString() + ' mi away' : null].filter(Boolean).join('  ·  ')))));
+    }).catch((e) => { if (seq === searchSeq) { list.replaceChildren(); note.textContent = e.message || 'Search failed. Check your signal.'; } });
+  }
+  function wireSearch() {
+    $('btn-search').appendChild(icon('search', 22));
+    $('search-close').appendChild(icon('close', 20));
+    $('btn-search').addEventListener('click', () => { if ($('search').hidden) openSearch(); else closeSearch(); });
+    $('search-close').addEventListener('click', closeSearch);
+    $('search-input').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 600); });
+    $('search-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runSearch(); e.target.blur(); } else if (e.key === 'Escape') closeSearch(); });
+  }
   function showLand(info) {
     const card = $('landcard');
     card.replaceChildren(
@@ -1299,11 +1339,11 @@
       h('p', { class: 'lc-fine' }, 'From PAD-US, the national public land inventory. Lines can be off and public does not always mean open to hunting. Check the manager\'s maps and regulations before you go.'));
     card.hidden = false;
   }
-  const OV_DEFAULT = { hillshade: 0.6, contours: 0.9, crops: 0.45, benches: 0.75 };
+  const OV_DEFAULT = { hillshade: 0.6, contours: 0.9, crops: 0.45, benches: 0.75, labels: 1 };
   function ovOpacity(name) { const o = settings().ovOpacity || {}; return o[name] != null ? o[name] : OV_DEFAULT[name]; }
   function applyOverlays() {
     const on = settings().overlays || {};
-    ['hillshade', 'contours', 'crops'].forEach((n) => M.setOverlay(n, !!on[n], ovOpacity(n)));
+    ['hillshade', 'contours', 'crops', 'labels'].forEach((n) => M.setOverlay(n, !!on[n], ovOpacity(n)));
     loadBenches(); loadSpots();
   }
   function setBase(key) { settings().basemap = key; S.save(); M.setBasemap(key); syncLayerUi(); }
@@ -1491,7 +1531,7 @@
     $('btn-measure').addEventListener('click', () => { if (ui.measure) endMeasure(); else startMeasure(); });
     $('btn-photo').insertBefore(icon('photo', 22), $('btn-photo').firstChild);
     $('btn-photo').addEventListener('click', () => { if (ui.measure) endMeasure(); endPlacing(); if (isMobile() && ui.sheet === 'peek') setSheet('half'); go('photo'); });
-    wireViewer();
+    wireViewer(); wireSearch();
     $('measurebar').addEventListener('click', (e) => {
       const b = e.target.closest('[data-m]'); if (!b || !ui.measure) return;
       const k = b.dataset.m;

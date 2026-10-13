@@ -35,6 +35,7 @@
       </div>
       <button id="status" class="chip" type="button" hidden></button>
       <div class="top-actions">
+        <button id="btn-search" class="round" type="button" aria-label="Search for a place" aria-expanded="false" aria-controls="search"></button>
         <button id="btn-base" class="round base-btn" type="button" aria-label="Switch map"><i></i><span>Topo</span></button>
         <button id="btn-layers" class="round" type="button" aria-label="Map layers" aria-expanded="false" aria-controls="layers"></button>
         <button id="btn-locate" class="round" type="button" aria-label="Show my location"></button>
@@ -56,6 +57,14 @@
         <button type="button" class="btn small primary" data-m="done">Done</button>
       </div>
     </div>
+    <div id="search" class="searchbox" role="search" hidden>
+      <div class="search-row">
+        <input id="search-input" type="text" inputmode="search" enterkeyhint="search" autocomplete="off" autocapitalize="words" spellcheck="false" placeholder="Town, lake, creek or public land" aria-label="Search for a place">
+        <button id="search-close" class="icon-btn" type="button" aria-label="Close search"></button>
+      </div>
+      <p id="search-note" class="pop-fine">Try a town, a lake, a creek or a conservation area. Add a state to narrow it, like “Stockton WI”.</p>
+      <div id="search-results" class="search-results"></div>
+    </div>
     <div id="layers" class="pop" hidden>
       <div class="seg seg4" role="group" aria-label="Map style">
         <button type="button" data-base="imagery">Summer</button>
@@ -65,6 +74,9 @@
       </div>
       <p class="pop-fine">Summer: leaves on (USDA photos). Leaf-off: bare winter trees, Missouri 2023–24.</p>
       <p class="pop-h">Overlays</p>
+      <div class="ov-row">
+        <label class="check"><input type="checkbox" data-ov="labels"><span class="sw sw-labels"></span>Roads and place names</label>
+      </div>
       <div class="ov-row">
         <label class="check"><input type="checkbox" data-ov="hillshade"><span class="sw sw-hill"></span>Lidar terrain</label>
         <input type="range" class="ov-op" data-ovop="hillshade" min="15" max="100" step="5" aria-label="Lidar terrain strength">
@@ -167,6 +179,7 @@
   <script src="js/map.js"></script>
   <script src="js/flow.js"></script>
   <script src="js/publand.js"></script>
+  <script src="js/search.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

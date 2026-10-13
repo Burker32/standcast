@@ -11,14 +11,14 @@ A bowhunting app that answers "which stand tonight?" It models wind, thermals, s
   2. Bump `VERSION` in `sw.js`.
   3. Run `npm test`, and `node --check` on each edited JS file.
   4. Commit and push to `main`. GitHub Pages rebuilds the site by itself, usually within a minute or two.
-- **Every deploy must bump `VERSION` in `sw.js`** (currently `'v31'`). The service worker serves cache-first, so phones keep the old app until the version changes. After a deploy, the owner closes and reopens the app once.
+- **Every deploy must bump `VERSION` in `sw.js`** (currently `'v32'`). The service worker serves cache-first, so phones keep the old app until the version changes. After a deploy, the owner closes and reopens the app once.
 - The app is served from the `/standcast/` subfolder, so every path in `index.html`, `manifest.webmanifest` and `sw.js` must stay relative (no leading `/`).
 - The repo is public. `CLAUDE.local.md` and zip files are kept out by `.gitignore`. Check `git status` before committing so nothing private goes up.
 - The empty `.nojekyll` file tells GitHub Pages to serve the files as they are.
 
 ## Files
 
-Scripts load in this order in `index.html`: engine, exif, marktypes, store, weather, map, flow, publand, app. Each file attaches to `window.SC`.
+Scripts load in this order in `index.html`: engine, exif, marktypes, store, weather, map, flow, publand, search, app. Each file attaches to `window.SC`.
 
 - **`js/engine.js`:** pure math with no DOM or network, so it's unit-testable.
   - Wind vectors and scent cones.
@@ -54,6 +54,7 @@ Scripts load in this order in `index.html`: engine, exif, marktypes, store, weat
 - **`js/publand.js`:** public land boundaries from the PAD-US 4.1 FeatureServer (Esri), fetched in 0.1° cells at zoom 11 or more.
   - Drawn as outlines only (a dark halo under a colored line), with an invisible fill so the area can be tapped.
   - Colors by manager type. Names like "Conservation Area" count as state land.
+- **`js/search.js`:** place search, nationwide. Towns, landforms, streams and lakes come from the USGS Geographic Names (GNIS) map service; public land comes from PAD-US by name. Looks within a few hours' drive of the map first, then everywhere; a trailing state ("Stockton WI") limits it; typed coordinates go straight there. The `labels` overlay in `map.js` draws USGS road and place-name tiles over the photo basemaps.
 - **`js/marktypes.js`:** marker types (scrape, rub, bed, trail, sighting, shed, food, plot, water, crossing, camera, feeder, blind, gate, parking, other), each with a color and an SVG path. `ORDER` controls the picker.
 - **`js/store.js`:** localStorage for stands, marks, hunts and layer toggles. Data stays on the device: sharing the link does not share data. There's backup/restore for manual sharing.
 - **`js/exif.js`:** reads GPS from photo EXIF for placing marks.
