@@ -47,7 +47,7 @@ Scripts load in this order in `index.html`: engine, exif, marktypes, store, weat
     - Follow mode, which keeps the user centered so rotation pivots on them.
     - The upright GPS dot with a heading cone.
     - The measure layer.
-  - On `zoomstart`, it adds `is-zooming` to the map container and CSS hides `.leaflet-overlay-pane`. This stops vector overlays from sliding during zoom animation.
+  - On `zoomstart`, it adds `is-zooming` to the map container. Nothing is hidden on that class any more (see "Zoom animation" below).
 - **`js/flow.js`:** the animated canvas, in its own pane.
   - Draws wind streaks, thermal beads (rising or sinking) with a glow, swirl rings and scent puffs.
   - Positions come from `latLngToContainerPoint`, so it works when the map is rotated.
