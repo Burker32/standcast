@@ -11,7 +11,7 @@ A bowhunting app that answers "which stand tonight?" It models wind, thermals, s
   2. Bump `VERSION` in `sw.js`.
   3. Run `npm test`, and `node --check` on each edited JS file.
   4. Commit and push to `main`. GitHub Pages rebuilds the site by itself, usually within a minute or two.
-- **Every deploy must bump `VERSION` in `sw.js`** (currently `'v30'`). The service worker serves cache-first, so phones keep the old app until the version changes. After a deploy, the owner closes and reopens the app once.
+- **Every deploy must bump `VERSION` in `sw.js`** (currently `'v31'`). The service worker serves cache-first, so phones keep the old app until the version changes. After a deploy, the owner closes and reopens the app once.
 - The app is served from the `/standcast/` subfolder, so every path in `index.html`, `manifest.webmanifest` and `sw.js` must stay relative (no leading `/`).
 - The repo is public. `CLAUDE.local.md` and zip files are kept out by `.gitignore`. Check `git status` before committing so nothing private goes up.
 - The empty `.nojekyll` file tells GitHub Pages to serve the files as they are.
@@ -30,6 +30,7 @@ Scripts load in this order in `index.html`: engine, exif, marktypes, store, weat
     - Pass 1 computes the air vector on each grid cell.
     - Pass 2 computes how much the air turns (vorticity) and how much flows collide (convergence).
     - Pass 3 picks peaks, giving ring radius `rM = spacing*(0.22+0.12*score)`.
+  - `findSpots()`: saddles (walk a circle round a spot and the ground goes up, down, up, down) and funnels (walkable ground 18 to 55 m wide pinched between steep slopes or dead-level lidar water). Returns only the strongest few, spaced apart; thresholds in `SPOTS`. Uses zoom-15 elevation squares. `map.js` `renderSpots()` draws them as small badges and `app.js` `showSpot()` explains a tapped one.
   - `distanceM`/`fmtYards`: distances for the measure tool.
 - **`js/weather.js`:**
   - Open-Meteo forecast, with retry and `forecastBusy` gating.

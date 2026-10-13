@@ -399,3 +399,40 @@ test('bench elevation tiles: fixed squares that cover the view', () => {
   assert.equal(E.findBenches(z, R, C, d).benches.length, 1);
   assert.equal(E.findBenches(z, R, C, d, { grow: 1 }).benches.length, 2);   // without growing it breaks in two
 });
+// ---- saddles and funnels ----
+function ground(rows, cols, f) {
+  const z = new Float32Array(rows * cols);
+  for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) z[i * cols + j] = f(i, j);
+  return z;
+}
+test('saddles: finds the low gap in a ridge, and none on a plain slope or flat', () => {
+  const R = 120, C = 120, d = 4;
+  // higher to the east and west (the ridge), lower to the north and south (the valleys either side)
+  const z = ground(R, C, (i, j) => 300 + 0.004 * Math.pow((j - 60) * d, 2) - 0.004 * Math.pow((i - 60) * d, 2));
+  const s = E.findSpots(z, R, C, d).saddles;
+  assert.equal(s.length, 1);
+  assert.ok(Math.abs(s[0].row - 60) <= 3 && Math.abs(s[0].col - 60) <= 3, 'at the gap: ' + s[0].row + ',' + s[0].col);
+  assert.ok(Math.abs(s[0].axisDeg - 90) <= 15, 'ridge runs east-west: ' + s[0].axisDeg);
+  assert.ok(s[0].depthM >= 2.5);
+  assert.equal(E.findSpots(ground(R, C, (i) => 300 - i * d * 0.2), R, C, d).saddles.length, 0);
+  assert.equal(E.findSpots(ground(R, C, (i, j) => 300 + 0.01 * i + 0.01 * j), R, C, d).saddles.length, 0);
+});
+test('funnels: a gentle strip pinched between steep ground, or between a bluff and water', () => {
+  const R = 120, C = 120, d = 4, steep = Math.tan(25 * Math.PI / 180);
+  // a 40 m wide bottom running north-south with steep sides, the whole thing tilted so it is not dead level
+  const hollow = ground(R, C, (i, j) => 300 + 0.03 * i * d + steep * d * Math.min(30, Math.max(0, Math.abs(j - 59.5) - 5)));
+  const f = E.findSpots(hollow, R, C, d).funnels;
+  assert.ok(f.length >= 1 && f.length <= 5, 'a few along the bottom, spaced out: ' + f.length);
+  assert.ok(f.every((x) => Math.abs(x.col - 59.5) <= 3), 'in the middle of the gap');
+  assert.ok(f.every((x) => x.widthM >= 28 && x.widthM <= 52), 'about 40 m wide: ' + f.map((x) => x.widthM).join(','));
+  assert.deepEqual(f[0].sides, ['up', 'up']);
+  for (let a = 0; a < f.length; a++) for (let b = a + 1; b < f.length; b++) assert.ok(Math.hypot(f[a].row - f[b].row, f[a].col - f[b].col) * d >= 120);
+  // dead-level water on the west, a gentle 40 m strip, then a bluff
+  const shore = ground(R, C, (i, j) => (j < 40 ? 250 : 250.5 + 0.03 * (j - 40) * d + 0.002 * i + steep * d * Math.min(30, Math.max(0, j - 50))));
+  const g = E.findSpots(shore, R, C, d).funnels;
+  assert.ok(g.length >= 1, 'found the strip along the water');
+  assert.ok(g[0].sides.includes('water') && g[0].sides.includes('up'), g[0].sides.join('/'));
+  // open ground and an even steep hillside have nothing to squeeze between
+  assert.equal(E.findSpots(ground(R, C, (i, j) => 300 + 0.03 * i + 0.02 * j), R, C, d).funnels.length, 0);
+  assert.equal(E.findSpots(ground(R, C, (i) => 300 - i * d * steep), R, C, d).funnels.length, 0);
+});

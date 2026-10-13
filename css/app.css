@@ -527,6 +527,14 @@ textarea { resize: vertical; min-height: 96px; line-height: 1.4; }
 .ov-hillshade { mix-blend-mode: multiply; filter: contrast(1.45) brightness(1.06); }
 .pop { max-height: calc(100% - 140px); overflow-y: auto; }
 
+/* saddles and funnels: small dark badges with a lime rim (round = saddle, square = funnel) */
+.sp-wrap { background: none; border: 0; }
+.sp { width: 26px; height: 26px; display: grid; place-items: center; background: #16210c; color: #fff; border: 2px solid var(--map-bench); box-shadow: 0 2px 6px rgba(0, 0, 0, .6); }
+.sp-saddle { border-radius: 50%; }
+.sp-funnel { border-radius: 7px; }
+.zoom-low .sp { transform: scale(.8); }
+.sw-saddle, .sw-funnel { background: #16210c !important; border: 2px solid var(--map-bench); }
+.sw-saddle { border-radius: 50%; }
 .sw-bench { background: var(--map-bench) !important; border: 2px solid #18280a; }
 .ov-bench { image-rendering: auto; }
 .sw-cont { background: repeating-linear-gradient(90deg, #2a2118 0 3px, transparent 3px 6px), #e9e2cf !important; }

@@ -280,6 +280,31 @@
   }
   function setBenchOpacity(o) { if (benchLayer) benchLayer.setOpacity(o); }
 
+  /* ---------- saddles and funnels ----------
+   * spots: [{ kind: 'saddle' | 'funnel', lat, lng, ... }]. Small symbols, not shading, so the map stays readable;
+   * a tap hands the spot back to the app, which explains it. */
+  var spotLayer = null;
+  var SPOT_GLYPH = {
+    saddle: 'M3 8 Q12 17 21 8 M3 19 Q12 13 21 19',          // a dip between two rises
+    funnel: 'M4 5 L10 12 L4 19 M20 5 L14 12 L20 19'          // two sides squeezing in
+  };
+  function renderSpots(spots, onTap) {
+    if (spotLayer) { map.removeLayer(spotLayer); spotLayer = null; }
+    if (!spots || !spots.length) return;
+    spotLayer = L.layerGroup();
+    spots.forEach(function (s) {
+      var node = el('div', 'sp sp-' + s.kind);
+      node.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="' + SPOT_GLYPH[s.kind] + '" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      var mk = L.marker([s.lat, s.lng], {
+        icon: L.divIcon({ className: 'sp-wrap', html: node, iconSize: [26, 26], iconAnchor: [13, 13] }),
+        keyboard: false, zIndexOffset: 50, title: s.kind === 'saddle' ? 'Saddle (estimated)' : 'Funnel (estimated)'
+      });
+      mk.on('click', function (e) { L.DomEvent.stopPropagation(e); if (onTap) onTap(s); });
+      mk.addTo(spotLayer);
+    });
+    spotLayer.addTo(map);
+  }
+
   /* ---------- measuring ----------
    * pts: [{lat,lng}], legs: ['143 yd', ...], total: '312 yd'. Points are draggable; labels stay upright. */
   function renderMeasure(m, cb) {
@@ -461,6 +486,6 @@
   SC.map = {
     BASES: BASES, init: init, setBasemap: setBasemap, render: render, renderField: renderField, bounds: bounds, flyTo: flyTo, fitPoints: fitPoints,
     center: center, setPlacing: setPlacing, invalidate: invalidate, locate: locate, watch: watch, unwatch: unwatch, watching: watching, cacheArea: cacheArea,
-    panByPixels: panByPixels, setPending: setPending, renderBenches: renderBenches, setBenchOpacity: setBenchOpacity, renderMeasure: renderMeasure, setOverlay: setOverlay, OVER: OVER, get leaflet() { return map; }, bearing: bearing, setBearing: setBearing, setFollow: setFollow, setHeading: setHeading, get following() { return follow; }, get lastFix() { return lastFix; }, get canRotate() { return !!map.setBearing; }, get basemap() { return baseKey; }, get zoom() { return map.getZoom(); }
+    panByPixels: panByPixels, setPending: setPending, renderBenches: renderBenches, setBenchOpacity: setBenchOpacity, renderSpots: renderSpots, renderMeasure: renderMeasure, setOverlay: setOverlay, OVER: OVER, get leaflet() { return map; }, bearing: bearing, setBearing: setBearing, setFollow: setFollow, setHeading: setHeading, get following() { return follow; }, get lastFix() { return lastFix; }, get canRotate() { return !!map.setBearing; }, get basemap() { return baseKey; }, get zoom() { return map.getZoom(); }
   };
 })();

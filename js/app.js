@@ -208,6 +208,56 @@
       }).catch(() => { benchKey = ''; });
     }, 400);
   }
+  /* ---- saddles and funnels: the strongest few in view, as small symbols you can tap. Estimated from the ground. */
+  let spotTimer = 0, spotKey = '';
+  function loadSpots(announce) {
+    clearTimeout(spotTimer);
+    spotTimer = setTimeout(() => {
+      const ov = settings().overlays || {}, on = !!(ov.saddles || ov.funnels);
+      const t = on && M.zoom >= 15 ? E.demTiles(M.bounds(), 150, 16, 15) : null;
+      if (!t) { spotKey = ''; M.renderSpots(null); if (on && announce) toast('Zoom in closer to see saddles and funnels.'); return; }
+      const key = [t.x0, t.y0, t.nx, t.ny, !!ov.saddles, !!ov.funnels].join(',');
+      if (key === spotKey) return;
+      spotKey = key;
+      if (announce) toast('Reading the ground…');
+      W.demMosaic(t).then((dem) => {
+        if (spotKey !== key) return;
+        if (dem.missing === dem.total) { spotKey = ''; if (announce) toast('Could not load the ground data. Check your signal.'); return; }
+        const res = E.findSpots(dem.z, dem.rows, dem.cols, t.cellM), b = t.bounds;
+        const place = (kind) => (s) => Object.assign({ kind: kind, lat: b.n - (s.row + 0.5) / dem.rows * (b.n - b.s), lng: b.w + (s.col + 0.5) / dem.cols * (b.e - b.w) }, s);
+        const spots = (ov.saddles ? res.saddles.map(place('saddle')) : []).concat(ov.funnels ? res.funnels.map(place('funnel')) : []);
+        M.renderSpots(spots, showSpot);
+        if (dem.missing) spotKey = '';
+        if (announce) {
+          const count = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
+          const parts = [ov.saddles ? count(res.saddles.length, 'saddle') : null, ov.funnels ? count(res.funnels.length, 'funnel') : null].filter(Boolean);
+          toast(spots.length ? parts.join(' and ') + ' in view (estimated). Tap one for details.' : 'None found on the ground in view.');
+        }
+      }).catch(() => { spotKey = ''; });
+    }, 400);
+  }
+  function showSpot(s) {
+    const card = $('landcard'), ft = (m) => Math.round(m * 3.281);
+    let title, body;
+    if (s.kind === 'saddle') {
+      title = 'Saddle';
+      body = 'A low gap in the ridge, about ' + ft(s.depthM) + ' ft lower than the high ground on either side. The ridge runs ' + E.compass(s.axisDeg) + ' to ' + E.compass(s.axisDeg + 180) + ' through it.';
+    } else {
+      const w = s.sides.filter((x) => x === 'water').length, up = s.sides.filter((x) => x === 'up').length;
+      const between = w === 2 ? 'water on both sides' : w === 1 ? 'water and ' + (up ? 'a steep bank' : 'a steep drop')
+        : up === 2 ? 'steep ground rising on both sides, like the bottom of a hollow' : up === 0 ? 'steep drops on both sides, like a narrow ridge' : 'a steep bank above and a steep drop below';
+      title = 'Funnel';
+      body = 'Easy walking about ' + Math.round(E.yards(s.widthM)) + ' yd wide, squeezed between ' + between + '.';
+    }
+    card.replaceChildren(
+      h('div', { class: 'lc-top' }, h('h3', null, title + ' (estimated)'),
+        h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Close', onclick: () => { card.hidden = true; } }, icon('close', 18))),
+      h('div', null, body),
+      h('div', { class: 'dim' }, 'Ground height about ' + ft(s.elevM) + ' ft.'),
+      h('button', { class: 'btn small', type: 'button', onclick: () => { card.hidden = true; holdAt(s.lat, s.lng); } }, icon('plus', 15), 'Add a mark here'),
+      h('p', { class: 'lc-fine' }, 'Worked out from the shape of the ground only. It cannot see cover, fences or sign, so check it on foot.'));
+    card.hidden = false;
+  }
   function nearestFc(lat, lng) {
     let best = null, bd = Infinity;
     stands().forEach((s) => { const fc = data.fc[s.id]; if (!fc) return; const d = distM(lat, lng, s.lat, s.lng); if (d < bd) { bd = d; best = fc; } });
@@ -1141,6 +1191,7 @@
       h('p', { class: 'line' }, 'Map photos: Summer is USDA aerial photography with the leaves on, refreshed every few years. Leaf-off is Missouri\'s statewide winter photography (north half 2023, south half 2024) with the trees bare, so you can see ridges, benches, trails and openings under the canopy. The round map button cycles Summer, Leaf-off and Topo; Hybrid is under Map layers.'),
       h('p', { class: 'line' }, 'Overlays (Map layers): Lidar terrain is USGS laser-scanned ground shape blended into the photo, so ridges, benches, saddles, ditches and old roads stand out even under timber. Crops 2025 is USDA CropScape: what was grown in each field last season (corn, soybeans, wheat, hay and so on). Each has its own strength slider and works on any base map.'),
       h('p', { class: 'line' }, 'Benches (Map layers) shades flat strips part-way up a hillside: ground that is clearly flatter than the slope above and below it. It is worked out from the lidar ground data for the area on screen, so zoom in to use it. It only knows the shape of the ground, so treat it as places worth walking, not proof deer travel there.'),
+      h('p', { class: 'line' }, 'Saddles and Funnels (Map layers) show as small dark badges with a green rim, only the strongest few in view so the map stays readable. A round badge is a saddle: a low gap in a ridge. A square badge is a funnel: easy walking squeezed between steep ground or water. Tap a badge to see what it found. Like benches, they come from the shape of the ground only.'),
       h('p', { class: 'line' }, 'Stand slopes and the thermal flow use the same lidar ground data (1 m where available) for a much closer read of each hillside than before.'),
       h('p', { class: 'line' }, 'Press and hold any spot on the map to add a stand or a mark right there: a target appears and you pick what it is, then tap Save. Tap the map at any point before saving to take it back off.'),
       h('p', { class: 'line' }, 'Measure yardage with the ruler button: tap points on the map (tap a stand or mark to snap to it). Each leg shows its yards and the bar shows the total. Drag any point to adjust it.'),
@@ -1202,6 +1253,7 @@
       if (c.checked && (c.dataset.ov === 'hillshade' || c.dataset.ov === 'contours')) toast((c.dataset.ov === 'contours' ? 'Contours' : 'Lidar terrain') + ' draw on demand, so give it a few seconds the first time.');
       if (c.checked && c.dataset.ov === 'contours' && M.zoom < 13) toast('Zoom in closer to see the 10 ft contour lines.');
       if (c.checked && c.dataset.ov === 'benches') loadBenches(true);
+      if (c.checked && (c.dataset.ov === 'saddles' || c.dataset.ov === 'funnels')) loadSpots(true);
       if (c.checked && c.dataset.ov === 'crops' && M.zoom > 16) toast('Crop map cells are 30 m, so it looks blocky up close.');
     }));
     pop.querySelectorAll('[data-ovop]').forEach((r) => r.addEventListener('input', () => {
@@ -1252,7 +1304,7 @@
   function applyOverlays() {
     const on = settings().overlays || {};
     ['hillshade', 'contours', 'crops'].forEach((n) => M.setOverlay(n, !!on[n], ovOpacity(n)));
-    loadBenches();
+    loadBenches(); loadSpots();
   }
   function setBase(key) { settings().basemap = key; S.save(); M.setBasemap(key); syncLayerUi(); }
   function syncLayerUi() {
@@ -1416,7 +1468,7 @@
       onMoveMark: (id, lat, lng) => { S.updateMark(id, { lat: lat, lng: lng }); renderMap(); },
       onRotate: (b) => updateCompass(b),
       onRotateEnd: (b) => { settings().view.bearing = b; S.save(); loadField(); },
-      onMoveEnd: (c, z) => { loadField(); loadBenches(); clearTimeout(saveTimer); saveTimer = setTimeout(() => { settings().view = { lat: c.lat, lng: c.lng, zoom: z, bearing: M.bearing() }; S.save(); }, 600); }
+      onMoveEnd: (c, z) => { loadField(); loadBenches(); loadSpots(); clearTimeout(saveTimer); saveTimer = setTimeout(() => { settings().view = { lat: c.lat, lng: c.lng, zoom: z, bearing: M.bearing() }; S.save(); }, 600); }
     });
     try { if (SC.publand && M.leaflet) {
       SC.publand.attach(M.leaflet, {

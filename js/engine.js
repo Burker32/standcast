@@ -473,6 +473,158 @@
     return { mask: mask, benches: benches, rows: rows, cols: cols };
   }
 
+  /* ---------- saddles and funnels ----------
+   * Point features from the same kind of elevation grid as benches (row 0 north, `cellM` meters a cell, about 4 m).
+   *  saddle: a low gap in a ridge. Walk a circle around the spot and the ground goes up, down, up, down: higher
+   *          both ways along the ridge, lower both ways off it. depthM is the smallest of those four changes.
+   *  funnel: a pinch of walkable ground squeezed between two obstacles (steep slopes or water) that are close
+   *          together across it, while it stays open for a good way along it. widthM is the gap at its narrowest.
+   * Only the strongest few are returned, spaced apart, so the map stays readable. Estimates from ground shape. */
+  var SPOTS = {
+    saddleRadiiM: [50, 90],   // circles walked around each spot
+    saddleNoiseM: 1.2,        // height change smaller than this counts as level
+    saddleMinM: 2.5,          // each of the four rises and falls must be at least this
+    saddleGapM: 130,          // keep saddles at least this far apart
+    hardDeg: 13,              // slopes this steep (or water) are the obstacles a funnel squeezes between
+    minHardM2: 500,           // ignore obstacles smaller than this (a cut bank, a boulder pile)
+    minWidthM: 18,            // narrower than this is a ditch or creek channel, not ground deer travel along
+    maxWidthM: 55,            // widest gap that still counts as a funnel
+    minRunM: 55,              // it must stay open at least this far both ways along the corridor
+    funnelGapM: 120,          // keep funnels at least this far apart
+    maxEach: 10               // strongest few of each kind
+  };
+  function findSpots(z, rows, cols, cellM, opts) {
+    var o = {}, k;
+    for (k in SPOTS) o[k] = opts && opts[k] != null ? opts[k] : SPOTS[k];
+    var n = rows * cols, i, j, idx, out = { saddles: [], funnels: [] };
+
+    /* saddles */
+    var zb = boxMean(z, rows, cols, Math.max(1, Math.round(8 / cellM)));   // broad shape only
+    var NA = 24, rings = o.saddleRadiiM.map(function (R) {
+      var pts = [];
+      for (var a = 0; a < NA; a++) { var t = a / NA * 2 * Math.PI; pts.push(Math.round(-Math.cos(t) * R / cellM), Math.round(Math.sin(t) * R / cellM)); }
+      return pts;
+    });
+    var margin = Math.ceil(Math.max.apply(null, o.saddleRadiiM) / cellM) + 1, cands = [], dz = new Float32Array(NA), lab = new Int8Array(NA);
+    var stride = Math.max(1, Math.round(8 / cellM));           // saddles are broad: every other cell is plenty
+    for (i = margin; i < rows - margin; i += stride) for (j = margin; j < cols - margin; j += stride) {
+      var c0 = zb[i * cols + j];
+      if (c0 !== c0) continue;
+      var best = 0, bestAxis = 0;
+      for (var ri = 0; ri < rings.length; ri++) {
+        var pts = rings[ri], ok = true, nz = 0, a;
+        for (a = 0; a < NA; a++) {
+          var v = zb[(i + pts[2 * a]) * cols + j + pts[2 * a + 1]] - c0;
+          if (v !== v) { ok = false; break; }
+          dz[a] = v; lab[a] = v > o.saddleNoiseM ? 1 : v < -o.saddleNoiseM ? -1 : 0;
+          if (lab[a]) nz++;
+        }
+        if (!ok || nz < 8) continue;
+        // start on a change of sign so each run of ups or downs is read whole
+        var s0 = -1, prev = 0;
+        for (a = NA - 1; a >= 0; a--) if (lab[a]) { prev = lab[a]; break; }
+        for (a = 0; a < NA; a++) if (lab[a]) { if (lab[a] !== prev) { s0 = a; break; } prev = lab[a]; }
+        if (s0 < 0) continue;
+        var runs = [], cur = null;
+        for (var q = 0; q < NA; q++) {
+          a = (s0 + q) % NA;
+          if (!lab[a]) continue;
+          if (!cur || cur.sign !== lab[a]) { cur = { sign: lab[a], peak: 0, at: a }; runs.push(cur); }
+          if (Math.abs(dz[a]) > cur.peak) { cur.peak = Math.abs(dz[a]); cur.at = a; }
+        }
+        if (runs.length !== 4) continue;                       // up, down, up, down and nothing else
+        var depth = Math.min(runs[0].peak, runs[1].peak, runs[2].peak, runs[3].peak);
+        if (depth < o.saddleMinM || depth <= best) continue;
+        // the two rises should be roughly across from each other, and so should the two falls
+        var apart = function (r1, r2) { var d = Math.abs(r1.at - r2.at); return Math.min(d, NA - d) / NA * 360; };
+        if (apart(runs[0], runs[2]) < 100 || apart(runs[1], runs[3]) < 100) continue;
+        best = depth;
+        var up = runs[0].sign > 0 ? runs[0] : runs[1];
+        bestAxis = norm(up.at / NA * 360) % 180;               // which way the ridge runs through the gap
+      }
+      if (best) cands.push({ row: i, col: j, depthM: best, axisDeg: bestAxis, elevM: c0 });
+    }
+    function spaced(list, gapM, better) {
+      list.sort(better);
+      var kept = [], g2 = (gapM / cellM) * (gapM / cellM);
+      for (var a = 0; a < list.length && kept.length < o.maxEach; a++) {
+        var p = list[a], clash = false;
+        for (var b = 0; b < kept.length; b++) { var dr = p.row - kept[b].row, dc = p.col - kept[b].col; if (dr * dr + dc * dc < g2) { clash = true; break; } }
+        if (!clash) kept.push(p);
+      }
+      return kept;
+    }
+    out.saddles = spaced(cands, o.saddleGapM, function (a, b) { return b.depthM - a.depthM; });
+
+    /* funnels */
+    var zs = boxMean(z, rows, cols, 1), hard = new Uint8Array(n), tanHard = Math.tan(o.hardDeg * DEG);
+    for (i = 1; i < rows - 1; i++) for (j = 1; j < cols - 1; j++) {
+      idx = i * cols + j;
+      var gx = (zs[idx + 1] - zs[idx - 1]) / (2 * cellM), gy = (zs[idx - cols] - zs[idx + cols]) / (2 * cellM), g = Math.hypot(gx, gy);
+      if (g !== g || g >= tanHard) { hard[idx] = g !== g ? 3 : 1; continue; }
+      // lidar water is drawn dead level: a patch of cells at exactly one height
+      var lo = z[idx], hi = z[idx];
+      for (var a2 = -1; a2 <= 1; a2++) for (var b2 = -1; b2 <= 1; b2++) { var w = z[idx + a2 * cols + b2]; if (w < lo) lo = w; if (w > hi) hi = w; }
+      if (hi - lo < 0.02) hard[idx] = 2;
+    }
+    // small obstacles do not turn deer: drop them
+    var seen = new Uint8Array(n), stack = new Int32Array(n), minCells = o.minHardM2 / (cellM * cellM);
+    for (var st = 0; st < n; st++) {
+      if (!hard[st] || hard[st] === 3 || seen[st]) continue;
+      var top = 0, mem = [];
+      stack[top++] = st; seen[st] = 1;
+      while (top) {
+        var p0 = stack[--top], pi = (p0 / cols) | 0, pj = p0 - pi * cols; mem.push(p0);
+        for (var da = -1; da <= 1; da++) for (var db = -1; db <= 1; db++) {
+          var ni = pi + da, nj = pj + db;
+          if ((!da && !db) || ni < 0 || nj < 0 || ni >= rows || nj >= cols) continue;
+          var nq = ni * cols + nj;
+          if (hard[nq] && hard[nq] !== 3 && !seen[nq]) { seen[nq] = 1; stack[top++] = nq; }
+        }
+      }
+      if (mem.length < minCells) for (k = 0; k < mem.length; k++) hard[mem[k]] = 0;
+    }
+    // steps to the nearest obstacle in each of 8 directions (255 = none in reach; grid edges and gaps count as none)
+    var DI = [-1, -1, 0, 1, 1, 1, 0, -1], DJ = [0, 1, 1, 1, 0, -1, -1, -1], dist = [];
+    for (var dir = 0; dir < 8; dir++) {
+      var D = new Uint8Array(n).fill(255), di = DI[dir], dj = DJ[dir];
+      var iA = di > 0 ? rows - 1 : 0, iB = di > 0 ? -1 : rows, iS = di > 0 ? -1 : 1;
+      var jA = dj > 0 ? cols - 1 : 0, jB = dj > 0 ? -1 : cols, jS = dj > 0 ? -1 : 1;
+      for (i = iA; i !== iB; i += iS) for (j = jA; j !== jB; j += jS) {
+        idx = i * cols + j;
+        if (hard[idx] === 1 || hard[idx] === 2) { D[idx] = 0; continue; }
+        var ti = i + di, tj = j + dj;
+        if (hard[idx] === 3 || ti < 0 || tj < 0 || ti >= rows || tj >= cols) continue;
+        var dn = D[ti * cols + tj];
+        if (dn < 254) D[idx] = dn + 1;
+      }
+      dist.push(D);
+    }
+    var fc = [];
+    for (i = 1; i < rows - 1; i++) for (j = 1; j < cols - 1; j++) {
+      idx = i * cols + j;
+      if (hard[idx]) continue;
+      var bestW = 0, bestP = -1;
+      for (var p = 0; p < 4; p++) {
+        var len = (p & 1 ? Math.SQRT2 : 1) * cellM, a1 = dist[p][idx], b1 = dist[p + 4][idx];
+        if (a1 === 255 || b1 === 255 || Math.abs(a1 - b1) > 2) continue;           // obstacles both sides, and we are mid-gap
+        var wd = (a1 + b1) * len;
+        if (wd < o.minWidthM || wd > o.maxWidthM || (bestW && wd >= bestW)) continue;
+        var pp = (p + 2) % 4, lenP = (pp & 1 ? Math.SQRT2 : 1) * cellM;
+        var run = Math.min(dist[pp][idx], dist[pp + 4][idx]) * lenP;               // how far it stays open along the corridor
+        if (run < Math.max(o.minRunM, 1.5 * wd)) continue;
+        bestW = wd; bestP = p;
+      }
+      if (bestP < 0) continue;
+      // what is on each side: higher ground, lower ground or water
+      var sa = idx + dist[bestP][idx] * (DI[bestP] * cols + DJ[bestP]), sb = idx + dist[bestP + 4][idx] * (DI[bestP + 4] * cols + DJ[bestP + 4]);
+      var side = function (s) { return hard[s] === 2 ? 'water' : zs[s] > zs[idx] ? 'up' : 'down'; };
+      fc.push({ row: i, col: j, widthM: bestW, acrossDeg: bestP * 45, sides: [side(sa), side(sb)], elevM: zs[idx] });
+    }
+    out.funnels = spaced(fc, o.funnelGapM, function (a, b) { return a.widthM - b.widthM; });
+    return out;
+  }
+
   /* Ground-elevation tiles for the bench layer: standard web-map tiles at one fixed zoom, 256 cells a side,
    * so the same squares are asked for every time and can be kept for use with no signal.
    * Returns the block of tiles covering bounds {s,w,n,e} plus a margin, or null if that is too many tiles. */
@@ -775,7 +927,7 @@
     solarPosition: solarPosition,
     terrainFromSamples: terrainFromSamples, terrainProbePoints: terrainProbePoints, offsetLatLng: offsetLatLng, resolveTerrain: resolveTerrain,
     flowGrid: flowGrid, flowCells: flowCells,
-    findBenches: findBenches, demTiles: demTiles, BENCH: BENCH,
+    findBenches: findBenches, demTiles: demTiles, BENCH: BENCH, findSpots: findSpots, SPOTS: SPOTS,
     thermal: thermal, swirl: swirl, swirlSpots: swirlSpots, heatIndex: heatIndex, thermalWords: thermalWords, thermalSwitches: thermalSwitches,
     normalizeForecast: normalizeForecast, sampleForecast: sampleForecast, nowMinFor: nowMinFor,
     windRating: windRating, isConfigured: isConfigured, ratingClass: ratingClass,
