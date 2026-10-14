@@ -542,3 +542,74 @@ test('sit log: a steady turn at one stand is learned and applied to its wind', (
   near(off.eff.from, base.eff.from, 0.001);
   assert.ok(fixed.rating > base.rating);
 });
+test('route check: scent off the walk in finds sign downwind, not upwind, with walking times', () => {
+  const fc = makeForecast({ speed: 8, dir: 0 });               // wind from the north: scent goes south
+  const stand = [LAT, LNG], truck = E.offsetLatLng(LAT, LNG, 270, 400);
+  const line = [truck, stand];
+  const r = E.resampleLine(line, 20);
+  near(r.lengthM, 400, 1);
+  assert.equal(r.pts[0].d, 0); near(r.pts[r.pts.length - 1].d, 400, 1);
+  assert.ok(r.pts.length >= 20 && r.pts.length <= 22);
+  const mid = E.offsetLatLng(LAT, LNG, 270, 200);
+  const south = E.offsetLatLng(mid[0], mid[1], 180, 80), north = E.offsetLatLng(mid[0], mid[1], 0, 80);
+  const marks = [
+    { id: 'a', type: 'bed', lat: south[0], lng: south[1] },
+    { id: 'b', type: 'bed', lat: north[0], lng: north[1] },
+    { id: 'c', type: 'parking', lat: south[0], lng: south[1] }      // not deer sign: ignored
+  ];
+  const t0 = L('2026-10-09T16:00');
+  const res = E.routeScent(r.pts, fc, { dir: 'in', t0, marks });
+  assert.deepEqual(res.hits.map((h) => h.mark.id), ['a']);
+  near(res.hits[0].dM, 80, 12);
+  near(res.minutes, 400 / 0.9 / 60, 0.01);
+  near(res.end, t0, 0.001); near(res.start, t0 - res.minutes, 0.001);
+  assert.ok(res.hits[0].t > res.start && res.hits[0].t < t0);
+  // walking out, the same line runs backwards in time from the stand
+  const back = E.routeScent(r.pts, fc, { dir: 'out', t0, marks });
+  near(back.start, t0, 0.001); near(back.end, t0 + back.minutes, 0.001);
+  assert.equal(back.samples[0].t > back.samples[back.samples.length - 1].t, true);
+  // turn the wind round and the other bed gets it
+  const fc2 = makeForecast({ speed: 8, dir: 180 });
+  assert.deepEqual(E.routeScent(r.pts, fc2, { dir: 'in', t0, marks }).hits.map((h) => h.mark.id), ['b']);
+});
+
+test('route check: the cone narrows in wind and pools in calm air', () => {
+  const to = 180, here = [LAT, LNG];
+  const p = (b, m) => E.offsetLatLng(LAT, LNG, b, m);
+  assert.ok(E.inScent(here[0], here[1], to, 8, ...p(180, 100)) > 0);
+  assert.equal(E.inScent(here[0], here[1], to, 8, ...p(240, 100)), -1);   // 60 deg off the cone line
+  assert.equal(E.inScent(here[0], here[1], to, 8, ...p(180, 400)), -1);   // past the reach at 8 mph
+  assert.ok(E.inScent(here[0], here[1], to, 1, ...p(0, 40)) > 0);          // calm: upwind too, close in
+  assert.equal(E.inScent(here[0], here[1], to, 1, ...p(180, 90)), -1);
+});
+test('stand sites: between bedding and food beats a lone feature, and the good winds keep scent off both', () => {
+  const at = (b, m) => { const p = E.offsetLatLng(LAT, LNG, b, m); return { lat: p[0], lng: p[1] }; };
+  const marks = [
+    Object.assign({ id: 'b', type: 'bed' }, at(0, 250)),         // bedding north
+    Object.assign({ id: 'f', type: 'plot' }, at(180, 300)),      // food plot south
+    Object.assign({ id: 's1', type: 'scrape' }, at(90, 40)),
+    Object.assign({ id: 's2', type: 'rub' }, at(270, 50)),
+    Object.assign({ id: 'x', type: 'crossing', name: 'creek' }, at(90, 1500))
+  ];
+  const cands = [
+    Object.assign({ kind: 'saddle' }, at(0, 0)),                 // between bed and food, with sign
+    Object.assign({ kind: 'bench' }, at(270, 900)),              // off on its own
+    Object.assign({ kind: 'funnel', widthM: 25 }, at(0, 230))    // right on the bedding
+  ];
+  const r = E.standSites(cands, marks, { windFrom: 90 });
+  assert.equal(r[0].kind, 'saddle');
+  assert.ok(r[0].why.some((w) => /Between your bedding/.test(w)));
+  assert.ok(r[0].why.some((w) => /2 sign marks/.test(w)));
+  // bedding N and food S: only east or west winds blow scent away from both
+  assert.deepEqual(r[0].goodWinds, ['E', 'W']);
+  assert.equal(r[0].windOk, true);
+  const fun = r.find((s) => s.kind === 'funnel');
+  assert.ok(fun.why.some((w) => /easy to bump/.test(w)));
+  assert.ok(fun.score < r[0].score);
+  assert.ok(r.some((s) => s.kind === 'crossing'));
+  // a stand already on the spot removes it; a bad wind costs points
+  assert.equal(E.standSites(cands, marks, { stands: [at(0, 10)] }).some((s) => s.kind === 'saddle'), false);
+  const south = E.standSites(cands, marks, { windFrom: 180 })[0];
+  assert.equal(south.windOk, false);
+  assert.ok(south.score < r[0].score);
+});

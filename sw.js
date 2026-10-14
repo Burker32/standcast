@@ -4,13 +4,13 @@
  *  - Map library (Leaflet, leaflet-rotate): shipped with the app in vendor/, cached on install.
  *  - Fonts from CDNs: cached the first time they load.
  *  - Forecast and elevation calls are never cached here (the app keeps its own copy). */
-const VERSION = 'v42';
+const VERSION = 'v43';
 const SHELL = 'sc-shell-' + VERSION;
 const TILES = 'sc-tiles-v1';
 const LIBS = 'sc-libs-' + VERSION;
 const FILES = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest',
-  'js/engine.js', 'js/exif.js', 'js/marktypes.js', 'js/store.js', 'js/weather.js', 'js/map.js', 'js/flow.js', 'js/publand.js', 'js/roads.js', 'js/parcels.js', 'js/labels.js', 'js/search.js', 'js/app.js',
+  'js/engine.js', 'js/exif.js', 'js/marktypes.js', 'js/store.js', 'js/pins.js', 'js/weather.js', 'js/map.js', 'js/flow.js', 'js/publand.js', 'js/roads.js', 'js/parcels.js', 'js/labels.js', 'js/search.js', 'js/app.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
   'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css', 'vendor/leaflet-rotate/leaflet-rotate-src.js',
   'vendor/leaflet/images/layers.png', 'vendor/leaflet/images/layers-2x.png',

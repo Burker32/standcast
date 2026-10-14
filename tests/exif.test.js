@@ -35,3 +35,27 @@ test('says why a photo has no location', () => {
   assert.equal(z.gps, null);
   assert.ok(['blanked', 'no-gps'].includes(z.why));
 });
+
+test('reads when a photo was taken (trail camera date stamp), else null', () => {
+  const { readDate } = require('../js/exif.js');
+  function jpeg(dt0, dtOrig, big) {
+    const T = Buffer.alloc(96), w16 = (o, x) => big ? T.writeUInt16BE(x, o) : T.writeUInt16LE(x, o), w32 = (o, x) => big ? T.writeUInt32BE(x, o) : T.writeUInt32LE(x, o);
+    T.write(big ? 'MM' : 'II', 0, 'latin1'); w16(2, 0x2A); w32(4, 8);
+    w16(8, 2);
+    w16(10, 0x0132); w16(12, 2); w32(14, 20); w32(18, 38);
+    w16(22, 0x8769); w16(24, 4); w32(26, 1); w32(30, 58);
+    w32(34, 0);
+    T.write(dt0, 38, 'latin1');
+    w16(58, 1); w16(60, 0x9003); w16(62, 2); w32(64, 20); w32(68, 76); w32(72, 0);
+    T.write(dtOrig, 76, 'latin1');
+    const app1 = Buffer.concat([Buffer.from([0xFF, 0xE1, 0, 0]), Buffer.from('Exif\0\0', 'latin1'), T]);
+    app1.writeUInt16BE(app1.length - 2, 2);
+    const b = Buffer.concat([Buffer.from([0xFF, 0xD8]), app1, Buffer.from([0xFF, 0xD9])]);
+    return b.buffer.slice(b.byteOffset, b.byteOffset + b.length);
+  }
+  assert.equal(readDate(jpeg('2026:10:01 08:00:00', '2026:10:12 06:41:09')), '2026-10-12T06:41:09');
+  assert.equal(readDate(jpeg('2026:10:01 08:00:00', '2026:10:12 06:41:09', true)), '2026-10-12T06:41:09');
+  assert.equal(readDate(jpeg('2026:10:01 08:00:00', '0000:00:00 00:00:00')), '2026-10-01T08:00:00');   // falls back to the file date
+  assert.equal(readDate(new ArrayBuffer(0)), null);
+  assert.equal(readDate(ab(require('node:path').join(__dirname, 'fixtures', 'gps_little.jpg')).slice(0, 40)), null);
+});

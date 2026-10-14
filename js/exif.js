@@ -73,5 +73,41 @@
     return { lat: lat, lng: lng };
   }
 
-  return { readGps: readGps, inspect: inspect };
+  // When the photo was taken, as the camera's own clock wrote it: 'YYYY-MM-DDTHH:MM:SS' (local time, no zone),
+  // or null. Trail cameras stamp this on every shot, so a card pull sorts itself by date.
+  function readDate(buf) {
+    try {
+      var v = new DataView(buf), off = 2;
+      if (v.byteLength < 12 || v.getUint16(0) !== 0xFFD8) return null;
+      while (off + 4 < v.byteLength) {
+        var marker = v.getUint16(off); off += 2;
+        if (marker === 0xFFDA || (marker & 0xFF00) !== 0xFF00) return null;
+        var len = v.getUint16(off);
+        if (marker === 0xFFE1 && v.getUint32(off + 2) === 0x45786966 && v.getUint16(off + 6) === 0) return tiffDate(v, off + 8);
+        off += len;
+      }
+    } catch (e) { /* truncated or malformed file */ }
+    return null;
+  }
+  function tiffDate(v, tiff) {
+    var little = v.getUint16(tiff) === 0x4949;
+    var u16 = function (o) { return v.getUint16(o, little); }, u32 = function (o) { return v.getUint32(o, little); };
+    if (u16(tiff + 2) !== 0x2A) return null;
+    function scan(ifd, want) {
+      var n = u16(ifd), found = {};
+      for (var i = 0; i < n; i++) { var e = ifd + 2 + i * 12, t = u16(e); if (want.indexOf(t) >= 0) found[t] = e; }
+      return found;
+    }
+    function text(e) {
+      var count = u32(e + 4), o = count > 4 ? tiff + u32(e + 8) : e + 8, s = '';
+      for (var k = 0; k < Math.min(count, 32); k++) { var c = v.getUint8(o + k); if (!c) break; s += String.fromCharCode(c); }
+      var m = /^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(s);
+      return m && m[1] !== '0000' ? m[1] + '-' + m[2] + '-' + m[3] + 'T' + m[4] + ':' + m[5] + ':' + m[6] : null;
+    }
+    var ifd0 = tiff + u32(tiff + 4), top = scan(ifd0, [0x8769, 0x0132]);
+    if (top[0x8769]) { var ex = scan(tiff + u32(top[0x8769] + 8), [0x9003, 0x9004]), d = ex[0x9003] || ex[0x9004]; if (d) { var r = text(d); if (r) return r; } }
+    return top[0x0132] ? text(top[0x0132]) : null;
+  }
+
+  return { readGps: readGps, inspect: inspect, readDate: readDate };
 });

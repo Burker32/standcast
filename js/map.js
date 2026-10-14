@@ -82,7 +82,7 @@
     map.on('zoomend', zoomClass); zoomClass();
     fieldRenderer = L.canvas ? L.canvas({ padding: 0.3 }) : undefined;
     g.field = L.layerGroup().addTo(map);
-    ['cone', 'arrows', 'marks', 'stands', 'measure'].forEach(function (k) { g[k] = L.layerGroup().addTo(map); });
+    ['route', 'cone', 'arrows', 'marks', 'stands', 'measure'].forEach(function (k) { g[k] = L.layerGroup().addTo(map); });
     setBasemap(opts.basemap || 'imagery');
     map.on('click', function (e) { if (opts.onTap) opts.onTap(e.latlng); });
     // press and hold on a phone (Leaflet turns the hold into this event), right-click on a computer
@@ -235,6 +235,20 @@
       });
     }
 
+    (model.routes || []).forEach(function (r) { routeLayers(r).forEach(function (l) { l.addTo(g.route); }); });
+
+    // bow range: 20, 30 and 40 yd round each stand, hidden when zoomed out (CSS .zoom-low)
+    if (L_.rings) model.stands.forEach(function (it) {
+      var s = it.stand;
+      [20, 30, 40].forEach(function (yd) {
+        var r = yd / 1.0936133;
+        L.circle([s.lat, s.lng], { radius: r, color: '#000', opacity: 0.35, weight: 3.2, fill: false, interactive: false, className: 'range-ring' }).addTo(g.route);
+        L.circle([s.lat, s.lng], { radius: r, color: '#fff', opacity: 0.85, weight: 1.3, dashArray: yd === 40 ? '5 5' : null, fill: false, interactive: false, className: 'range-ring' }).addTo(g.route);
+        var at = E.offsetLatLng(s.lat, s.lng, 135, r);
+        L.marker(at, { icon: L.divIcon({ className: 'ring-lab range-ring', html: el('span', null, String(yd)), iconSize: [0, 0], iconAnchor: [0, 0] }), interactive: false, keyboard: false, zIndexOffset: -50 }).addTo(g.route);
+      });
+    });
+
     model.stands.forEach(function (it) {
       var s = it.stand, st = it.state;
       if (st) {
@@ -277,6 +291,28 @@
       mk.on('dragend', function () { var p = mk.getLatLng(); if (opts.onMoveStand) opts.onMoveStand(s.id, p.lat, p.lng); });
       mk.addTo(g.stands);
     });
+  }
+
+  /* A walk to a stand: { which: 'in' | 'out', line: [[lat,lng]], samples, samplesOut }. Orange line (dashed for a
+   * separate way out), with short ticks every ~60 m pointing where your scent drifts: red where it reaches sign. */
+  var ROUTE_COLOR = '#ff8a1f', SCENT_BAD = '#ff3b3b';
+  function routeLayers(r) {
+    var o = { interactive: false, lineCap: 'round', lineJoin: 'round' }, out = [];
+    out.push(L.polyline(r.line, Object.assign({ color: '#000', opacity: 0.5, weight: 7 }, o)));
+    out.push(L.polyline(r.line, Object.assign({ color: ROUTE_COLOR, opacity: 1, weight: 3.5, dashArray: r.which === 'out' ? '9 7' : null }, o)));
+    // one tick per ~60 m stretch, red if your scent reaches sign anywhere in that stretch; way-out ticks are dashed
+    [r.samples, r.samplesOut].forEach(function (list, k) {
+      if (!list || !list.length) return;
+      var every = Math.max(1, Math.round(60 / Math.max(1, (list[1] ? list[1].d - list[0].d : 20))));
+      for (var i = 0; i < list.length - 1; i += every) {
+        var p = list[i], bad = false;
+        for (var j = i; j < Math.min(list.length, i + every); j++) if (list[j].bad.length) bad = true;
+        var len = Math.max(25, Math.min(90, p.reachM * 0.4)), tip = E.offsetLatLng(p.lat, p.lng, p.to, len);
+        out.push(L.polyline([[p.lat, p.lng], tip], Object.assign({ color: '#000', opacity: bad ? 0.45 : 0.3, weight: bad ? 5 : 4 }, o)));
+        out.push(L.polyline([[p.lat, p.lng], tip], Object.assign({ color: bad ? SCENT_BAD : '#fff', opacity: bad ? 0.95 : 0.75, weight: bad ? 2.6 : 1.8, dashArray: k ? '5 4' : (bad ? null : '3 4') }, o)));
+      }
+    });
+    return out;
   }
 
   // A swirl mark: a broken loop with an arrowhead, sized in meters.
@@ -368,6 +404,21 @@
       mk.addTo(spotLayer);
     });
     spotLayer.addTo(map);
+  }
+
+  /* ---------- stand-site suggestions: numbered badges, best first ---------- */
+  var siteLayer = null;
+  function renderSites(sites, onTap) {
+    if (siteLayer) { map.removeLayer(siteLayer); siteLayer = null; }
+    if (!sites || !sites.length) return;
+    siteLayer = L.layerGroup();
+    sites.forEach(function (s, i) {
+      var node = el('div', 'site-pin', String(i + 1));
+      var mk = L.marker([s.lat, s.lng], { icon: L.divIcon({ className: 'site-wrap', html: node, iconSize: [30, 30], iconAnchor: [15, 15] }), keyboard: false, zIndexOffset: 700, title: 'Possible stand site ' + (i + 1) });
+      mk.on('click', function (e) { L.DomEvent.stopPropagation(e); if (onTap) onTap(i); });
+      mk.addTo(siteLayer);
+    });
+    siteLayer.addTo(map);
   }
 
   /* ---------- measuring ----------
@@ -564,6 +615,6 @@
   SC.map = {
     BASES: BASES, init: init, setBasemap: setBasemap, render: render, renderField: renderField, bounds: bounds, flyTo: flyTo, fitPoints: fitPoints,
     center: center, setPlacing: setPlacing, invalidate: invalidate, locate: locate, watch: watch, unwatch: unwatch, watching: watching, cacheArea: cacheArea,
-    panByPixels: panByPixels, setPending: setPending, setFound: setFound, fitBox: fitBox, renderBenches: renderBenches, setBenchOpacity: setBenchOpacity, renderSpots: renderSpots, renderMeasure: renderMeasure, setOverlay: setOverlay, OVER: OVER, get leaflet() { return map; }, bearing: bearing, setBearing: setBearing, setFollow: setFollow, setHeading: setHeading, get following() { return follow; }, get lastFix() { return lastFix; }, get canRotate() { return !!map.setBearing; }, get basemap() { return baseKey; }, get zoom() { return map.getZoom(); }
+    panByPixels: panByPixels, setPending: setPending, setFound: setFound, fitBox: fitBox, renderBenches: renderBenches, setBenchOpacity: setBenchOpacity, renderSpots: renderSpots, renderSites: renderSites, renderMeasure: renderMeasure, setOverlay: setOverlay, OVER: OVER, get leaflet() { return map; }, bearing: bearing, setBearing: setBearing, setFollow: setFollow, setHeading: setHeading, get following() { return follow; }, get lastFix() { return lastFix; }, get canRotate() { return !!map.setBearing; }, get basemap() { return baseKey; }, get zoom() { return map.getZoom(); }
   };
 })();

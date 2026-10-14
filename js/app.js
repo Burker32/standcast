@@ -161,7 +161,7 @@
         selected: ui.selStand === s.id, windText: st ? E.compass(st.eff.from) + ' ' + Math.round(st.eff.speed) : ''
       };
     });
-    M.render({ stands: items, marks: S.state.marks.map((m) => ({ mark: m, selected: ui.selMark === m.id })), layers: settings().layers, animating: animOn() });
+    M.render({ stands: items, marks: S.state.marks.map((m) => ({ mark: m, selected: ui.selMark === m.id })), layers: settings().layers, animating: animOn(), routes: mapRoutes() });
     drawField();
   }
 
@@ -459,12 +459,15 @@
     const body = $('sheet-body'), key = ui.view + ':' + ui.tab + ':' + (ui.selStand || ui.selMark || '') + ':' + (stands().length ? 'has' : 'none') + ':' + (data.ref ? 'fc' : 'nofc');
     const keep = key === lastKey ? body.scrollTop : 0; lastKey = key;
     if (ui.view !== 'add') clearPending();   // left the chooser without picking
+    if (ui.view !== 'spots' && ui.sites) { ui.sites = null; M.renderSites(null); }
     // moving on to anything else keeps an unsaved pin, the same as tapping Save
     if (ui.draft && !(ui.draft.kind === 'stand' ? ui.view === 'stand' && ui.selStand === ui.draft.id : ui.view === 'mark' && ui.selMark === ui.draft.id)) ui.draft = null;
     let node;
     if (ui.view === 'add') node = addView();
     else if (ui.view === 'photo') node = photoAddView();
     else if (ui.view === 'placing') node = placingView();
+    else if (ui.view === 'import') node = importView();
+    else if (ui.view === 'spots') node = siteView();
     else if (ui.view === 'stand') node = standView();
     else if (ui.view === 'mark') node = markView();
     else if (ui.tab === 'marks') node = marksView();
@@ -566,6 +569,7 @@
         h('span', { class: 'card-main' }, h('span', { class: 'card-title' }, h('b', null, s.name)),
           h('span', { class: 'why info' }, data.loading ? 'Loading forecast…' : 'No forecast for this stand yet.'))));
     });
+    root.appendChild(h('button', { class: 'btn wide-btn', type: 'button', onclick: findSites }, icon('search', 16), 'Find new stand sites in view'));
     root.appendChild(h('p', { class: 'fine' }, 'Wind is modeled from a weather forecast. Thermals are estimated from the slope, sun and clouds. Scores are a guide, so trust your own read of the woods.'));
     return root;
   }
@@ -815,6 +819,126 @@
         h('button', { class: 'btn', type: 'button', onclick: () => { ui.logOpen = false; renderSheet(); } }, 'Cancel'))));
     return box;
   }
+  /* ---- the walk in and out ----
+   * stand.routes = { in: [[lat,lng],...] drawn from the truck to the stand, out: the same or null (= same way out) }.
+   * Ground slope along the walk comes from lidar (5 heights round each point), kept in routeTerrain by route,
+   * so the check itself (engine.routeScent) is quick enough to redo whenever the hunt window changes. */
+  const routeTerrain = {}, routeBusy = {};
+  function routeLine(s, which) { const r = s.routes || {}; return which === 'out' ? (r.out || r.in || null) : (r.in || null); }
+  function routePts(line) {
+    const key = JSON.stringify(line);
+    if (routeTerrain[key]) return routeTerrain[key];
+    if (routeBusy[key]) return null;
+    const pts = E.resampleLine(line).pts, probes = [];
+    pts.forEach((p) => E.terrainProbePoints(p.lat, p.lng, 25).forEach((q) => probes.push(q)));
+    routeBusy[key] = true;
+    W.elevations(probes).then((z) => {
+      let missing = 0;
+      pts.forEach((p, i) => {
+        const k = i * 5, zz = z.slice(k, k + 5);
+        if (zz.some((v) => v == null)) { missing++; return; }
+        p.terrain = E.terrainFromSamples(zz[1], zz[2], zz[3], zz[4], 25);
+      });
+      routeTerrain[key] = { pts: pts, missing: missing };
+    }).catch(() => { routeTerrain[key] = { pts: pts, missing: pts.length }; })
+      .then(() => { delete routeBusy[key]; renderSheet(); renderMap(); });
+    return null;
+  }
+  // The check for one stand's walk in or out in the chosen hunt window: the engine result plus timing, or a reason.
+  function routeCheck(s, which) {
+    const line = routeLine(s, which), fc = data.fc[s.id], sit = currentSit();
+    if (!line || line.length < 2) return { none: true };
+    if (!fc || !sit) return { wait: 'No forecast yet.' };
+    const w = E.sitWindowFor(fc, sit.date, sit.kind);
+    if (!w) return { wait: 'No forecast for this hunt yet.' };
+    const rt = routePts(line);
+    if (!rt) return { wait: 'Checking the wind along your route…' };
+    const res = E.routeScent(rt.pts, fc, { dir: which, t0: which === 'out' ? w.end : w.start, marks: S.state.marks });
+    res.noTerrain = rt.missing > rt.pts.length / 2;
+    return res;
+  }
+  function markLabel(m) { const t = MT.TYPES[m.type] || MT.TYPES.other; return t.label + (m.name ? ' "' + m.name + '"' : ''); }
+  function routeSummary(s, which) {
+    const r = routeCheck(s, which), sit = currentSit(), same = which === 'out' && !(s.routes || {}).out;
+    const head = which === 'in' ? 'Walk in' : 'Walk out' + (same ? ' (same way)' : '');
+    if (r.none) return null;
+    if (r.wait) return h('div', { class: 'route-sum' }, h('b', null, head), h('p', { class: 'line dim' }, r.wait));
+    const when = which === 'in' ? 'leave the truck about ' + E.fmtClock(r.start) + ' to be in by ' + E.fmtClock(r.end)
+      : 'leaving the stand about ' + E.fmtClock(r.start);
+    const box = h('div', { class: 'route-sum ' + (r.hits.length ? 'bad' : 'good') },
+      h('b', null, head + ': ' + E.fmtYards(r.lengthM) + ', about ' + Math.max(1, Math.round(r.minutes)) + ' min'),
+      h('p', { class: 'line dim' }, (sit ? sit.label + ': ' : '') + when + '.'));
+    if (!r.hits.length) box.appendChild(h('p', { class: 'why good' }, 'Clean: your scent stays off the sign you have marked.'));
+    r.hits.slice(0, 4).forEach((x) => box.appendChild(h('p', { class: 'why bad' },
+      'About ' + E.fmtClock(x.t) + ' your scent drifts over ' + markLabel(x.mark) + ', ' + E.fmtYards(x.dM) + ' downwind of your path.')));
+    if (r.hits.length > 4) box.appendChild(h('p', { class: 'why bad' }, 'And ' + (r.hits.length - 4) + ' more marks.'));
+    if (r.noTerrain) box.appendChild(h('p', { class: 'fine tight' }, 'Ground slope along the route did not load, so thermals are left out.'));
+    return box;
+  }
+  function routeBlock(s) {
+    const r = s.routes || {};
+    const box = h('div', { class: 'block' }, h('h3', null, 'Walk in and out'));
+    if (!r.in) {
+      box.appendChild(h('p', { class: 'line dim' }, 'Draw the way you walk in, from your truck to this stand. StandCast runs the wind and thermals along it at walking pace for the hunt you picked, and warns you if your scent drifts over bedding, trails or other sign you have marked.'));
+      box.appendChild(h('button', { class: 'btn small', type: 'button', onclick: () => startRoute(s, 'in') }, icon('plus', 15), 'Draw my walk in'));
+      return box;
+    }
+    box.appendChild(routeSummary(s, 'in'));
+    box.appendChild(routeSummary(s, 'out'));
+    box.appendChild(h('div', { class: 'row-wrap' },
+      h('button', { class: 'btn small', type: 'button', onclick: () => showRoute(s) }, icon('locate', 15), 'Show on map'),
+      h('button', { class: 'btn small', type: 'button', onclick: () => startRoute(s, 'in') }, 'Redraw walk in'),
+      h('button', { class: 'btn small', type: 'button', onclick: () => startRoute(s, 'out') }, r.out ? 'Redraw way out' : 'Different way out'),
+      r.out ? h('button', { class: 'btn small', type: 'button', onclick: () => { S.updateStand(s.id, { routes: { in: r.in, out: null } }); renderAll(); } }, 'Same way out') : null,
+      confirmTwice('Delete routes', () => { S.updateStand(s.id, { routes: null }); renderAll(); })));
+    box.appendChild(h('p', { class: 'fine tight' }, 'Walking pace about 2 mph. Red ticks on the map show where your scent drifts over sign; wind and thermals are estimates.'));
+    return box;
+  }
+  // The selected stand's walk in and out for the map, with scent ticks (none while a route is being drawn).
+  function mapRoutes() {
+    const s = ui.view === 'stand' && S.getStand(ui.selStand);
+    if (!s || !s.routes || (ui.measure && ui.measure.route)) return [];
+    const r = s.routes, out = [];
+    ['in', 'out'].forEach((w) => {
+      if (w === 'out' && !r.out) return;
+      const line = routeLine(s, w); if (!line) return;
+      const c = routeCheck(s, w);
+      out.push({ which: w, line: line, samples: c.samples || [] });
+    });
+    // same way out: show the way-out scent too, on the walk-in line
+    if (r.in && !r.out && out[0]) { const c = routeCheck(s, 'out'); if (c.samples) out[0].samplesOut = c.samples; }
+    return out;
+  }
+  function showRoute(s) {
+    const line = (routeLine(s, 'in') || []).concat(routeLine(s, 'out') || []);
+    if (isMobile()) setSheet('peek');
+    M.fitPoints(line.map((p) => ({ lat: p[0], lng: p[1] })));
+  }
+  // Drawing a route reuses the measuring tool: tap from the truck to the stand, then Save.
+  function startRoute(s, which) {
+    startMeasure();
+    ui.measure.route = { standId: s.id, which: which };
+    const old = routeLine(s, which);
+    if (old && (which === 'in' || (s.routes || {}).out)) ui.measure.pts = old.map((p) => ({ lat: p[0], lng: p[1] }));
+    drawMeasure(); renderMap();
+    if (old) showRoute(s);
+  }
+  function saveRoute() {
+    const m = ui.measure, rt = m.route, s = S.getStand(rt.standId);
+    if (!s) return endMeasure();
+    const line = m.pts.map((p) => [p.lat, p.lng]);
+    // the walk ends at the stand: add it if the last tap was not on it
+    const last = line[line.length - 1];
+    if (!last || E.distanceM(last[0], last[1], s.lat, s.lng) > 12) line.push([s.lat, s.lng]);
+    if (line.length < 2) { toast('Tap at least one point between your truck and the stand.'); return; }
+    const r = Object.assign({ in: null, out: null }, s.routes);
+    r[rt.which] = line;
+    S.updateStand(s.id, { routes: r });
+    endMeasure();
+    selectStand(s.id);
+    if (isMobile()) setSheet('half');
+    toast(rt.which === 'in' ? 'Walk in saved. Checking the wind along it…' : 'Way out saved.');
+  }
   function standView() {
     const s = S.getStand(ui.selStand);
     if (!s) { ui.view = 'list'; return listView(); }
@@ -848,6 +972,7 @@
       windGrid(s),
       h('div', { class: 'legend-row' }, h('span', { class: 'lg good' }, 'Good here'), h('span', { class: 'lg bad' }, 'Bad here'), h('span', { class: 'lg none' }, 'Does not matter'))));
     root.appendChild(terrainPanel(s));
+    if (!s.example) root.appendChild(routeBlock(s));
     root.appendChild(h('div', { class: 'block' },
       h('h3', null, 'Stand details'),
       h('label', { class: 'field', for: 'stand-type' }, h('span', null, 'Type'),
@@ -909,6 +1034,7 @@
     root.appendChild(h('label', { class: 'field', for: 'mark-note' }, h('span', null, 'Note'),
       h('textarea', { id: 'mark-note', rows: 4, maxlength: 1500, placeholder: 'Fresh or old, size, direction it faces, what you noticed.', oninput: (e) => S.updateMark(m.id, { note: e.target.value }) }, m.note || '')));
     root.appendChild(photoBlock(m));
+    if (m.type === 'camera' || (m.shots || []).length) root.appendChild(cameraBlock(m));
     root.appendChild(h('p', { class: 'fine' }, 'Added ' + new Date(m.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) + '. Drag the pin on the map to move it.'));
     root.appendChild(coordsRow(m.lat, m.lng));
     root.appendChild(h('div', { class: 'block actions' },
@@ -924,11 +1050,13 @@
       root.appendChild(h('div', { class: 'empty small' }, h('p', null, 'Drop a pin where you find sign, add a note and a photo, and it stays on your map. Photos with location data place their own pin.'),
         h('div', { class: 'stack' },
           h('button', { class: 'btn primary', type: 'button', onclick: () => go('add') }, icon('plus', 16), 'Add a mark'),
-          h('button', { class: 'btn', type: 'button', onclick: () => go('photo') }, icon('photo', 16), 'Add a photo'))));
+          h('button', { class: 'btn', type: 'button', onclick: () => go('photo') }, icon('photo', 16), 'Add a photo'),
+          h('button', { class: 'btn', type: 'button', onclick: pickPins }, 'Import pins from onX, HuntStand or Garmin'))));
       return root;
     }
     const note = backupNote(); if (note) root.appendChild(note);
     root.appendChild(h('button', { class: 'btn wide-btn', type: 'button', onclick: () => go('photo') }, icon('photo', 16), 'Add a photo'));
+    root.appendChild(pinsRow());
     const counts = {}; all.forEach((m) => { counts[m.type] = (counts[m.type] || 0) + 1; });
     root.appendChild(h('div', { class: 'chips' },
       [['all', 'All ' + all.length]].concat(MT.ORDER.filter((k) => counts[k]).map((k) => [k, MT.TYPES[k].label + ' ' + counts[k]]))
@@ -958,6 +1086,7 @@
         h('span', { class: 'type-dot', style: 'background:' + MT.TYPES[k].color }, MT.icon(k, 18)), MT.TYPES[k].label))));
     if (held) return root;
     root.appendChild(h('button', { class: 'btn wide-btn', type: 'button', onclick: () => go('photo') }, icon('photo', 16), 'Add a photo'));
+    root.appendChild(h('button', { class: 'btn wide-btn', type: 'button', onclick: findSites }, icon('search', 16), 'Find stand sites in view'));
     root.appendChild(h('p', { class: 'fine' }, 'Take a photo at the sign and the pin drops where you are standing. You can also press and hold any spot on the map to add something there.'));
     return root;
   }
@@ -1055,6 +1184,16 @@
     const bar = $('measurebar');
     bar.hidden = false;
     bar.querySelector('.mb-total').textContent = n < 2 ? '0 yd' : E.fmtYards(r.total);
+    const rt = ui.measure.route;
+    bar.classList.toggle('is-route', !!rt);
+    bar.querySelector('[data-m=done]').textContent = rt ? 'Save route' : 'Done';
+    bar.querySelector('[data-m=cancel]').hidden = !rt;
+    bar.querySelector('[data-m=me]').textContent = rt ? 'Start at me' : 'From me';
+    if (rt) {
+      bar.querySelector('.mb-sub').textContent = (n === 0 ? (rt.which === 'in' ? 'Walk in: tap where you park, then each turn on the way to the stand.' : 'Way out: tap from where you park, along the way you walk, to the stand.')
+        : 'Keep tapping along your walk. The stand is added at the end for you.') + ' Drag a point to adjust.';
+      return;
+    }
     bar.querySelector('.mb-sub').textContent = n === 0 ? 'Tap the map to drop the first point. Tap a stand or mark to snap to it.'
       : n === 1 ? 'Tap the next point.'
       : (n - 1) + (n === 2 ? ' leg' : ' legs') + (n > 2 ? '  ·  last leg ' + E.fmtYards(r.legs[r.legs.length - 1]) : '') + '  ·  drag a point to adjust';
@@ -1071,8 +1210,10 @@
     drawMeasure();
   }
   function endMeasure() {
+    const wasRoute = ui.measure && ui.measure.route;
     ui.measure = null; $('btn-measure').classList.remove('on');
     drawMeasure();
+    if (wasRoute) renderMap();
   }
   function measureFromMe() {
     wantLocation = true;
@@ -1196,6 +1337,17 @@
     const root = h('div', { class: 'view' }), list = photoMarks();
     root.appendChild(h('div', { class: 'view-head' }, h('h2', null, 'Photos'), h('p', { class: 'sub' }, list.length ? list.length + (list.length === 1 ? ' photo' : ' photos') + ' on the map' : 'Your sign photos, all in one place')));
     root.appendChild(h('button', { class: 'btn wide-btn', type: 'button', onclick: () => go('photo') }, icon('photo', 16), 'Add a photo'));
+    const cams = S.state.marks.filter((m) => m.type === 'camera');
+    if (cams.length) {
+      root.appendChild(h('h3', { class: 'sec-head' }, 'Trail cameras'));
+      cams.forEach((m) => {
+        const n = (m.shots || []).length, last = n ? Math.max.apply(null, m.shots.map((x) => x.at)) : 0;
+        root.appendChild(h('button', { class: 'row-card', type: 'button', onclick: () => selectMark(m.id) },
+          h('span', { class: 'type-dot', style: 'background:' + MT.TYPES.camera.color }, MT.icon('camera', 16)),
+          h('span', { class: 'row-main' }, h('b', null, m.name || 'Camera'), h('span', { class: 'row-note' }, n ? n + (n === 1 ? ' photo' : ' photos') + ', newest ' + shotTime(last) : 'No card photos yet. Tap to add them.'))));
+      });
+      if (list.length) root.appendChild(h('h3', { class: 'sec-head' }, 'Sign photos'));
+    }
     if (!list.length) {
       root.appendChild(h('div', { class: 'empty small' }, h('p', null, 'No photos yet. Take one at a scrape, rub or trail and it shows up here and as a pin on the map.')));
       return root;
@@ -1209,31 +1361,110 @@
     })));
     return root;
   }
-  let viewerAt = -1;
-  function closeViewer() { viewerAt = -1; $('viewer').hidden = true; $('viewer').replaceChildren(); }
-  function openViewer(i) {
-    const list = photoMarks(), box = $('viewer');
-    if (!list.length) return closeViewer();
-    viewerAt = i = (i + list.length) % list.length;
-    const m = list[i], t = MT.TYPES[m.type] || MT.TYPES.other;
-    const img = h('img', { class: 'viewer-img', alt: t.label + ' photo' });
-    S.photoUrl(m.photoId).then((u) => { if (u && viewerAt === i) img.src = u; });
-    const many = list.length > 1;
+  /* Full-screen viewer. It pages through a list of items { pid, title, note, button: { label, icon, run } },
+   * either the photo library (default) or one trail camera's photos. */
+  let viewerAt = -1, viewerList = null;
+  function libraryItems() {
+    return photoMarks().map((m) => {
+      const t = MT.TYPES[m.type] || MT.TYPES.other;
+      return { pid: m.photoId, title: (m.name ? m.name + '  ·  ' : '') + t.label + '  ·  ' + new Date(m.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }),
+        note: m.note, button: { label: 'Show on map', icon: 'locate', run: () => { closeViewer(); selectMark(m.id); } } };
+    });
+  }
+  function closeViewer() { viewerAt = -1; viewerList = null; $('viewer').hidden = true; $('viewer').replaceChildren(); }
+  function openViewer(i, list) {
+    if (list) viewerList = list;
+    const items = typeof viewerList === 'function' ? viewerList() : (viewerList || libraryItems()), box = $('viewer');
+    if (!items.length) return closeViewer();
+    viewerAt = i = (i + items.length) % items.length;
+    const it = items[i];
+    const img = h('img', { class: 'viewer-img', alt: it.title || 'Photo' });
+    S.photoUrl(it.pid).then((u) => { if (u && viewerAt === i) img.src = u; });
+    const many = items.length > 1;
     box.replaceChildren(
       h('div', { class: 'viewer-top' },
-        h('span', null, many ? (i + 1) + ' of ' + list.length : ''),
+        h('span', null, many ? (i + 1) + ' of ' + items.length : ''),
         h('button', { class: 'viewer-btn', type: 'button', 'aria-label': 'Close', onclick: closeViewer }, icon('close', 22))),
       h('div', { class: 'viewer-stage' },
         many ? h('button', { class: 'viewer-btn viewer-prev', type: 'button', 'aria-label': 'Previous photo', onclick: () => openViewer(i - 1) }, icon('back', 22)) : null,
         img,
         many ? h('button', { class: 'viewer-btn viewer-next', type: 'button', 'aria-label': 'Next photo', onclick: () => openViewer(i + 1) }, icon('back', 22)) : null),
       h('div', { class: 'viewer-foot' },
-        h('div', { class: 'viewer-cap' },
-          h('b', null, (m.name ? m.name + '  ·  ' : '') + t.label + '  ·  ' + new Date(m.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })),
-          m.note ? h('span', null, m.note) : null),
-        h('button', { class: 'btn small', type: 'button', onclick: () => { closeViewer(); selectMark(m.id); } }, icon('locate', 15), 'Show on map')));
+        h('div', { class: 'viewer-cap' }, h('b', null, it.title), it.note ? h('span', null, it.note) : null),
+        it.button ? h('button', { class: 'btn small', type: 'button', onclick: (e) => it.button.run(e) }, it.button.icon ? icon(it.button.icon, 15) : null, it.button.label) : null));
     box.hidden = false;
   }
+  function viewerCount() { const v = typeof viewerList === 'function' ? viewerList() : (viewerList || libraryItems()); return v.length; }
+
+  /* ---- trail camera photos: a camera pin keeps every card pull, sorted by the camera's date stamp ----
+   * m.shots = [{ id (photo store), at (ms, the camera's local clock read as this phone's time), added }] */
+  function shotTime(at) {
+    const d = new Date(at);
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ', ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+  function shotItems(markId) {
+    return () => {
+      const m = S.getMark(markId); if (!m) return [];
+      return (m.shots || []).slice().sort((a, b) => b.at - a.at).map((x) => ({
+        pid: x.id, title: (m.name || 'Camera') + '  ·  ' + shotTime(x.at), note: null,
+        button: { label: 'Delete photo', icon: 'close', run: (e) => {
+          const btn = e.currentTarget;   // first tap asks, second tap deletes
+          if (!btn.dataset.armed) { btn.dataset.armed = '1'; btn.classList.add('danger', 'armed'); btn.textContent = 'Tap again to delete'; return; }
+          const mm = S.getMark(markId); if (!mm) return;
+          S.updateMark(markId, { shots: (mm.shots || []).filter((y) => y !== x) }); S.deletePhoto(x.id);
+          toast('Photo deleted'); renderSheet();
+          if (viewerCount()) openViewer(viewerAt); else closeViewer();
+        } }
+      }));
+    };
+  }
+  function addShots(markId, files) {
+    const list = Array.prototype.slice.call(files || []);
+    if (!list.length) return;
+    toast('Adding ' + list.length + (list.length === 1 ? ' photo…' : ' photos…'));
+    let bad = 0;
+    // one at a time, so a big card pull does not run the phone out of memory
+    const step = (k, got) => {
+      if (k >= list.length) return Promise.resolve(got);
+      const f = list[k];
+      return f.arrayBuffer().then((buf) => {
+        const stamp = SC.exif.readDate(buf), at = stamp ? new Date(stamp).getTime() : (f.lastModified || Date.now());
+        return resizeToBlob(f, 1280, 0.8).then(S.putPhoto).then((id) => { got.push({ id: id, at: at, added: Date.now() }); });
+      }).catch(() => { bad++; }).then(() => step(k + 1, got));
+    };
+    step(0, []).then((got) => {
+      const m = S.getMark(markId);
+      if (!m) { got.forEach((x) => S.deletePhoto(x.id)); return; }
+      S.updateMark(markId, { shots: (m.shots || []).concat(got) });
+      toast('Added ' + got.length + (got.length === 1 ? ' photo' : ' photos') + (bad ? '. ' + bad + ' could not be read.' : '.'));
+      renderAll();
+    });
+  }
+  function cameraBlock(m) {
+    const shots = (m.shots || []).slice().sort((a, b) => b.at - a.at), box = h('div', { class: 'block' }, h('h3', null, 'Camera photos'));
+    if (!shots.length) box.appendChild(h('p', { class: 'line dim' }, 'Pull the card, then add its photos here. They sort by the date and time the camera stamped on them, so you can see when deer move past this camera.'));
+    else {
+      const first = shots[shots.length - 1].at, last = shots[0].at;
+      const day = (t) => new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' });
+      box.appendChild(h('p', { class: 'line' }, h('b', null, shots.length + (shots.length === 1 ? ' photo' : ' photos')), '  ·  ' + (day(first) === day(last) ? day(first) : day(first) + ' to ' + day(last))));
+      // when the camera fires, by time of day (the camera's own clock)
+      const when = { Dawn: 0, Day: 0, Dusk: 0, Night: 0 };
+      shots.forEach((x) => { const hr = new Date(x.at).getHours(); when[hr >= 5 && hr < 8 ? 'Dawn' : hr >= 8 && hr < 16 ? 'Day' : hr >= 16 && hr < 20 ? 'Dusk' : 'Night']++; });
+      box.appendChild(h('p', { class: 'line dim' }, Object.keys(when).map((k) => k + ' ' + when[k]).join('  ·  ')));
+      const limit = ui.shotsAll === m.id ? shots.length : 24;
+      box.appendChild(h('div', { class: 'gallery shots' }, shots.slice(0, limit).map((x, i) => {
+        const b = h('button', { class: 'gal-item', type: 'button', 'aria-label': 'Camera photo ' + shotTime(x.at), onclick: () => openViewer(i, shotItems(m.id)) },
+          h('span', { class: 'gal-when' }, shotTime(x.at)));
+        S.photoUrl(x.id).then((u) => { if (u) b.style.backgroundImage = 'url("' + u + '")'; });
+        return b;
+      })));
+      if (shots.length > limit) box.appendChild(h('button', { class: 'btn small', type: 'button', onclick: () => { ui.shotsAll = m.id; renderSheet(); } }, 'Show all ' + shots.length));
+    }
+    box.appendChild(h('button', { class: 'btn', type: 'button', onclick: () => { shotsFor = m.id; const f = $('file-shots'); f.value = ''; f.click(); } }, icon('photos', 16), 'Add photos from the card'));
+    box.appendChild(h('p', { class: 'fine tight' }, 'Photos are made smaller to save space and stay on this phone. They go into your backup file.'));
+    return box;
+  }
+  let shotsFor = null;
   function wireViewer() {
     let x0 = null;
     const box = $('viewer');
@@ -1241,7 +1472,7 @@
     box.addEventListener('touchend', (e) => {
       if (x0 == null || viewerAt < 0) return;
       const dx = e.changedTouches[0].clientX - x0; x0 = null;
-      if (Math.abs(dx) > 60 && photoMarks().length > 1) openViewer(viewerAt + (dx < 0 ? 1 : -1));
+      if (Math.abs(dx) > 60 && viewerCount() > 1) openViewer(viewerAt + (dx < 0 ? 1 : -1));
     });
     document.addEventListener('keydown', (e) => {
       if (viewerAt < 0) return;
@@ -1272,6 +1503,139 @@
     const a = h('a', { href: URL.createObjectURL(blob), download: name });
     document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  /* ---- stand-site suggestions for the area in view ----
+   * Reads the ground once (zoom-15 lidar squares), finds saddles, funnels and benches, and scores them with the
+   * hunter's marked bedding, food and sign and the wind for the hunt picked on the Stands tab (engine.standSites). */
+  function findSites() {
+    const t = M.zoom >= 15 ? E.demTiles(M.bounds(), 0, 16, 15) : null;
+    if (!t) { toast('Zoom in to about a square mile around where you hunt, then try again.'); return; }
+    if (ui.measure) endMeasure();
+    ui.sites = { busy: true, list: [] }; ui.siteOpen = null;
+    if (isMobile() && ui.sheet === 'peek') setSheet('half');
+    go('spots');
+    const view = M.bounds();
+    W.demMosaic(t).then((dem) => {
+      if (dem.missing === dem.total) throw new Error('none');
+      const b = t.bounds;
+      const place = (kind) => (s) => Object.assign({}, s, { kind: kind, lat: b.n - (s.row + 0.5) / dem.rows * (b.n - b.s), lng: b.w + (s.col + 0.5) / dem.cols * (b.e - b.w) });
+      const sp = E.findSpots(dem.z, dem.rows, dem.cols, t.cellM), be = E.findBenches(dem.z, dem.rows, dem.cols, t.cellM);
+      const inView = (c) => c.lat >= view.s && c.lat <= view.n && c.lng >= view.w && c.lng <= view.e;
+      const cands = sp.saddles.map(place('saddle')).concat(sp.funnels.map(place('funnel')),
+        be.benches.slice().sort((x, y) => y.areaM2 - x.areaM2).slice(0, 30).map(place('bench'))).filter(inView);
+      const c = M.center(), fc = nearestFc(c.lat, c.lng), sit = currentSit();
+      const windFrom = fc && sit ? E.sampleForecast(fc, sitMid(sit)).from : null;
+      const marks = S.state.marks.filter(inView);
+      ui.sites = { list: E.standSites(cands, S.state.marks, { stands: stands(), windFrom: windFrom }), windFrom: windFrom, sit: sit ? sit.label : null,
+        hasBed: marks.some((m) => m.type === 'bed'), hasFood: marks.some((m) => ['food', 'plot', 'water', 'feeder'].indexOf(m.type) >= 0) };
+      if (ui.view === 'spots') { M.renderSites(ui.sites.list, (i) => focusSite(i)); renderSheet(); }
+    }).catch(() => { ui.sites = { error: 'Could not load the ground data. Check your signal and try again.' }; renderSheet(); });
+  }
+  function focusSite(i) {
+    const s = ui.sites && ui.sites.list[i]; if (!s) return;
+    ui.siteOpen = i;
+    if (ui.view !== 'spots') go('spots'); else renderSheet();
+    M.flyTo(s.lat, s.lng, Math.max(M.zoom, 16.5), isMobile() ? $('sheet').offsetHeight : 0);
+    const card = document.querySelector('[data-site="' + i + '"]'); if (card) card.scrollIntoView({ block: 'nearest' });
+  }
+  const SITE_NAME = { saddle: 'Saddle', funnel: 'Funnel', bench: 'Bench', crossing: 'Crossing' };
+  function siteView() {
+    const st = ui.sites || {}, root = h('div', { class: 'view' });
+    root.appendChild(backHeader('Stand sites', () => { ui.sites = null; M.renderSites(null); go('list'); }));
+    if (st.busy) { root.appendChild(h('p', { class: 'note' }, 'Reading the ground for saddles, funnels and benches…')); return root; }
+    if (st.error) { root.appendChild(h('p', { class: 'note warn' }, st.error)); return root; }
+    root.appendChild(h('p', { class: 'sub' }, 'Best spots in view' + (st.sit && st.windFrom != null ? ', for ' + st.sit.toLowerCase() + ' (' + E.compass(st.windFrom) + ' wind)' : '')));
+    if (!st.hasBed || !st.hasFood) root.appendChild(h('p', { class: 'note' }, 'Tip: mark ' + (!st.hasBed && !st.hasFood ? 'bedding and food' : !st.hasBed ? 'bedding' : 'food') +
+      ' in this area and the picks get much better: StandCast looks for spots between them and tells you which winds keep your scent off both.'));
+    if (!st.list.length) { root.appendChild(h('p', { class: 'line dim' }, 'No saddles, funnels or benches found in view. Try a hillier area, or zoom out a little.')); return root; }
+    st.list.forEach((s, i) => {
+      const orList = (a) => a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' or ' + a[a.length - 1];
+      const winds = s.goodWinds ? (s.goodWinds.length ? 'Hunt it on ' + (s.goodWinds[0] === 'E' ? 'an ' : 'a ') + orList(s.goodWinds) + ' wind.' : 'No wind keeps scent off both bedding and food here; hunt it on a wind that protects the bedding.') : 'Mark bedding or food nearby for wind advice.';
+      root.appendChild(h('div', { class: 'site-card' + (ui.siteOpen === i ? ' on' : ''), 'data-site': i },
+        h('div', { class: 'site-head' }, h('span', { class: 'site-pin' }, String(i + 1)),
+          h('b', null, SITE_NAME[s.kind] || 'Spot'), h('span', { class: 'site-score ' + (s.score >= 0.6 ? 'good' : s.score >= 0.4 ? 'ok' : 'none') }, s.score >= 0.6 ? 'Strong' : s.score >= 0.4 ? 'Worth a look' : 'Long shot')),
+        s.why.map((w) => h('p', { class: 'line' }, w)),
+        h('p', { class: 'why ' + (s.windOk === false ? 'bad' : s.windOk ? 'good' : 'info') }, winds + (s.windOk === true ? ' The ' + E.compass(st.windFrom) + ' wind fits.' : s.windOk === false ? ' The ' + E.compass(st.windFrom) + ' wind does not.' : '')),
+        h('div', { class: 'row2' },
+          h('button', { class: 'btn small', type: 'button', onclick: () => focusSite(i) }, icon('locate', 15), 'Show'),
+          h('button', { class: 'btn small primary', type: 'button', onclick: () => {
+            M.renderSites(null); ui.sites = null;
+            ui.pending = { lat: s.lat, lng: s.lng, at: 0 }; placePending('stand');
+          } }, icon('plus', 15), 'Put a stand here'))));
+    });
+    root.appendChild(h('p', { class: 'fine' }, 'Picked from the shape of the ground and your own marks. It cannot see cover, fences, property lines or where deer really walk, so scout it before you hang a stand.'));
+    return root;
+  }
+  /* ---- pins to and from other map apps (GPX, KML, KMZ) ---- */
+  function pickPins() { const f = $('file-pins'); f.value = ''; f.click(); }
+  function readPins(file) {
+    const zipped = /\.kmz$/i.test(file.name);
+    const text = zipped ? file.arrayBuffer().then(SC.pins.unzipKml) : file.text();
+    return text.then((t) => {
+      const r = SC.pins.parse(t);
+      // skip anything already on the map: same spot (within 5 yd) and same name
+      const near = (p, q) => distM(p.lat, p.lng, q.lat, q.lng) < 5;
+      const fresh = r.points.filter((p) => !stands().some((s) => near(p, s) && s.name === p.name) && !S.state.marks.some((m) => near(p, m) && (m.name || '') === p.name));
+      ui.importing = { file: file.name, format: r.format, points: fresh, skipped: r.points.length - fresh.length, lines: r.lines };
+      if (isMobile() && ui.sheet === 'peek') setSheet('half');
+      go('import');
+      if (fresh.length) M.fitPoints(fresh.map((p) => ({ lat: p.lat, lng: p.lng })));
+    }).catch((e) => toast(e && e.message ? e.message : 'Could not read that file.'));
+  }
+  function kindLabel(k) { return k === 'stand' ? 'Stand' : (MT.TYPES[k] || MT.TYPES.other).label; }
+  function importView() {
+    const im = ui.importing;
+    if (!im) { ui.view = 'list'; return marksView(); }
+    const root = h('div', { class: 'view' });
+    root.appendChild(backHeader('Import pins', () => { ui.importing = null; go('list', { tab: 'marks' }); }));
+    const n = im.points.length, counts = {};
+    im.points.forEach((p) => { counts[p.kind] = (counts[p.kind] || 0) + 1; });
+    root.appendChild(h('p', { class: 'sub' }, im.file + '  ·  ' + im.format));
+    if (!n) {
+      root.appendChild(h('p', { class: 'note' }, im.skipped ? 'Everything in this file is already on your map.' : 'No pins found in this file.' + (im.lines ? ' It has ' + im.lines + (im.lines === 1 ? ' line' : ' lines') + ' (tracks or boundaries), which StandCast does not bring in.' : '')));
+      return root;
+    }
+    root.appendChild(h('p', { class: 'line' }, h('b', null, n + (n === 1 ? ' pin' : ' pins')), ' ready to add: ' +
+      Object.keys(counts).sort((a, b) => counts[b] - counts[a]).map((k) => counts[k] + ' ' + kindLabel(k).toLowerCase()).join(', ') + '.'));
+    if (im.skipped) root.appendChild(h('p', { class: 'line dim' }, im.skipped + ' already on your map, so left out.'));
+    if (im.lines) root.appendChild(h('p', { class: 'line dim' }, im.lines + (im.lines === 1 ? ' line (a track or boundary) is' : ' lines (tracks or boundaries) are') + ' not brought in.'));
+    root.appendChild(h('p', { class: 'fine tight' }, 'The kind is guessed from each pin\'s name and note. Change any of them below, or later on the pin.'));
+    const opts = [['stand', 'Stand']].concat(MT.ORDER.map((k) => [k, MT.TYPES[k].label]));
+    const list = h('div', { class: 'imp-list' });
+    im.points.slice(0, 60).forEach((p) => list.appendChild(h('div', { class: 'imp-row' },
+      h('span', { class: 'imp-name' }, p.name || '(no name)'),
+      h('select', { 'aria-label': 'Kind for ' + (p.name || 'pin'), onchange: (e) => { p.kind = e.target.value; } },
+        opts.map((o) => h('option', { value: o[0], selected: o[0] === p.kind }, o[1]))))));
+    if (n > 60) list.appendChild(h('p', { class: 'fine tight' }, 'And ' + (n - 60) + ' more, added with their guessed kinds.'));
+    root.appendChild(list);
+    root.appendChild(h('div', { class: 'row2' },
+      h('button', { class: 'btn primary', type: 'button', onclick: addImported }, 'Add ' + n + (n === 1 ? ' pin' : ' pins')),
+      h('button', { class: 'btn', type: 'button', onclick: () => { ui.importing = null; go('list', { tab: 'marks' }); } }, 'Cancel')));
+    return root;
+  }
+  function addImported() {
+    const im = ui.importing; if (!im) return;
+    let ns = 0, nm = 0;
+    im.points.forEach((p) => {
+      const at = p.time && !isNaN(Date.parse(p.time)) ? Date.parse(p.time) : Date.now();
+      if (p.kind === 'stand') { S.addStand({ name: p.name || 'Imported stand', lat: p.lat, lng: p.lng, notes: p.note || '', createdAt: at }); ns++; }
+      else { S.addMark({ type: MT.TYPES[p.kind] ? p.kind : 'other', name: p.name || '', note: p.note || '', lat: p.lat, lng: p.lng, createdAt: at }); nm++; }
+    });
+    ui.importing = null;
+    toast('Added ' + [ns ? ns + (ns === 1 ? ' stand' : ' stands') : null, nm ? nm + (nm === 1 ? ' mark' : ' marks') : null].filter(Boolean).join(' and ') + (ns ? '. Mark each stand\'s good and bad winds.' : '.'));
+    go('list', { tab: ns && !nm ? 'stands' : 'marks' });
+    if (ns) refresh();
+  }
+  function exportPins() {
+    if (!stands().length && !S.state.marks.length) { toast('Nothing to export yet.'); return; }
+    const gpx = SC.pins.toGpx(stands().filter((s) => !s.example), S.state.marks, (t) => (MT.TYPES[t] || MT.TYPES.other).label);
+    download('standcast-pins-' + new Date().toISOString().slice(0, 10) + '.gpx', new Blob([gpx], { type: 'application/gpx+xml' }));
+    toast('Saved a GPX file of your stands, marks and walks. Import it in onX, HuntStand, Garmin or Google Earth.');
+  }
+  function pinsRow() {
+    return h('div', { class: 'row2' },
+      h('button', { class: 'btn small', type: 'button', onclick: pickPins }, 'Import pins'),
+      h('button', { class: 'btn small', type: 'button', onclick: exportPins }, 'Export pins (GPX)'));
   }
   /* ---- backup ---- */
   function saveBackup() {
@@ -1310,6 +1674,15 @@
       h('p', { class: 'line' }, 'Before each sit, StandCast saves its wind call for every stand on this phone. After the sit, open the stand, tap Log a sit, and tap the way the wind was coming from (milkweed, smoke or powder at the stand). StandCast scores its own call against yours: a call within one compass point counts as a match.'),
       h('p', { class: 'line' }, 'Each stand keeps a track record. Once 3 or more of your checks agree that the air at a stand runs off the forecast, for example a draw that bends a southwest wind to the west, StandCast turns that stand\'s modeled wind to match. You can switch the correction off on the stand.'),
       h('p', { class: 'line' }, 'A sit logged days later, with no saved call for that day, is kept but not scored.')));
+    root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Walk in and out'),
+      h('p', { class: 'line' }, 'Open a stand and tap Draw my walk in. Tap where you park, then each turn on the way; the stand is added at the end. "Start at me" begins the line where you are standing. StandCast walks the route at about 2 mph so you reach the stand as the hunt window opens, and works out the wind and slope thermals at each step.'),
+      h('p', { class: 'line' }, 'On the map, white ticks show where your scent drifts as you walk; red ticks mean it reaches bedding, a trail, a scrape, a rub, food, water or a sighting you marked. The way out is checked as you leave at the end of the window, on the same path unless you draw a different one.')));
+    root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Finding stand sites'),
+      h('p', { class: 'line' }, 'Zoom in to about a square mile and tap Find new stand sites in view (on the Stands tab or the + menu). StandCast reads the lidar ground for saddles, funnels and benches, then ranks them using your marks: spots between bedding and food, close to scrapes, rubs and trails, and crossings you marked. Each pick lists the winds that keep your scent off the bedding and the food.'),
+      h('p', { class: 'line' }, 'It only sees the shape of the ground and your own marks, so scout a spot before you hang a stand. Mark bedding and food first for the best picks.')));
+    root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Bow range and trail cameras'),
+      h('p', { class: 'line' }, 'Rings at 20, 30 and 40 yd show round every stand when you zoom in. Turn them off in the layers menu.'),
+      h('p', { class: 'line' }, 'A Camera pin keeps every card pull. Open it and tap Add photos from the card to add many at once. They sort by the date the camera stamped on them, and the pin shows how many came at dawn, in the day, at dusk and at night.')));
     root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Reading the thermals'),
       h('p', { class: 'line' }, 'Wind and thermals are drawn apart. The long pale streaks are the wind near the ground, slowed by the trees. The orange and purple glow marks slopes where thermals are working, and the bright beads crawling across it show which way: orange climbing uphill, purple draining downhill. Beads go faint where the wind is strong enough to overpower them. Pink spinning rings are swirl, where the two fight. The green puffs leaving each stand are your scent riding all of it together.'),
       h('p', { class: 'line' }, 'Under Map layers you can show just the wind, just the thermals, or both.'),
@@ -1348,6 +1721,10 @@
       h('div', { class: 'row2' },
         h('button', { class: 'btn', type: 'button', onclick: saveBackup }, 'Save a backup'),
         h('button', { class: 'btn', type: 'button', onclick: () => { imp.value = ''; imp.click(); } }, 'Restore a backup'))));
+    root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Pins from other apps'),
+      h('p', { class: 'line' }, 'Bring in your pins from onX, HuntStand, Garmin, Google Earth or any app that exports GPX, KML or KMZ. In onX, open a pin folder and choose Export; save the file, then tap Import pins here. StandCast guesses each pin\'s kind from its name, and you can change it before adding.'),
+      h('p', { class: 'line' }, 'Export pins saves a GPX file of your stands, marks and walks that those apps can read. Photos and sit logs stay in the StandCast backup.'),
+      pinsRow()));
     const ex = stands().filter((s) => s.example);
     root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Example data'),
       ex.length ? h('button', { class: 'btn', type: 'button', onclick: () => { ex.forEach((s) => S.removeStand(s.id)); ui.selStand = null; toast('Examples removed'); recompute(); go('list'); refresh(); } }, 'Remove example stands')
@@ -1408,6 +1785,8 @@
       if (c.dataset.layer === 'publand' && SC.publand) { SC.publand.setEnabled(c.checked); if (c.checked && M.zoom < 11) toast('Zoom in to see public land boundaries.'); }
       if (c.dataset.layer === 'field' || c.dataset.layer === 'swirl' || c.dataset.layer === 'animate') loadField(); renderMap(); }));
     ['file-photo', 'file-camera'].forEach((id) => $(id).addEventListener('change', (e) => { const f = e.target.files && e.target.files[0]; if (f && photoCb) photoCb(f); }));
+    $('file-shots').addEventListener('change', (e) => { if (shotsFor) addShots(shotsFor, e.target.files); });
+    $('file-pins').addEventListener('change', (e) => { const f = e.target.files && e.target.files[0]; if (f) readPins(f); });
     $('file-import').addEventListener('change', (e) => {
       const f = e.target.files && e.target.files[0]; if (!f) return;
       f.text().then(S.importAll).then((r) => { toast('Restored ' + r.stands + ' stands and ' + r.marks + ' marks'); refresh(); renderAll(); }).catch((err) => toast(err.message));
@@ -1711,8 +2090,10 @@
       if (k === 'undo') { ui.measure.pts.pop(); drawMeasure(); }
       else if (k === 'clear') { ui.measure.pts = []; drawMeasure(); }
       else if (k === 'me') measureFromMe();
-      else if (k === 'done') endMeasure();
+      else if (k === 'done') { if (ui.measure.route) saveRoute(); else endMeasure(); }
+      else if (k === 'cancel') { const id = ui.measure.route && ui.measure.route.standId; endMeasure(); if (id) { selectStand(id); if (isMobile()) setSheet('half'); } }
     });
+    if (settings().layers.rings == null) { settings().layers.rings = true; S.save(); }   // new in v43: on for everyone
     applyOverlays();
     wire(); syncLayerUi(); setSheet(isMobile() ? 'half' : 'full');
     renderAll();

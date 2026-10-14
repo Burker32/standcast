@@ -1034,6 +1034,130 @@
     return { deg: Math.round(deg), n: offs.length };
   }
 
+  /* ---------- the walk in and out: where your scent goes on the way ---------- */
+
+  // walkMps: a careful walk in the woods, about 2 mph. sign: mark types deer use, so scent over them matters.
+  var ROUTE = { walkMps: 0.9, stepM: 20, maxPts: 150, quietEndM: 25,
+    sign: ['bed', 'trail', 'crossing', 'scrape', 'rub', 'food', 'plot', 'sighting', 'feeder', 'water'] };
+  function bearingTo(lat1, lng1, lat2, lng2) {
+    return norm(Math.atan2((lng2 - lng1) * Math.cos((lat1 + lat2) / 2 * DEG), lat2 - lat1) / DEG);
+  }
+  // Scent reach in meters, the same cone the map draws for stands (coneRing).
+  function scentReach(speed) { return speed < 1.5 ? 55 : clamp(55 + speed * 30, 55, 420); }
+  // Distance in meters if the point (pLat, pLng) sits in the scent cone from (lat, lng) heading toDeg, else -1.
+  function inScent(lat, lng, toDeg, speed, pLat, pLng) {
+    var d = distanceM(lat, lng, pLat, pLng);
+    if (d > scentReach(speed)) return -1;
+    if (speed < 1.5 || d < 15) return d;                         // calm: scent pools all round you
+    return angDiff(bearingTo(lat, lng, pLat, pLng), toDeg) <= clamp(38 - speed * 2.2, 10, 38) ? d : -1;
+  }
+  // Points every stepM (or further apart on a long walk, at most maxPts) along a line of [lat, lng],
+  // each with d = meters from the start. The last point is always the line's end.
+  function resampleLine(line, stepM) {
+    var out = [], total = 0, i;
+    if (!line || !line.length) return { pts: out, lengthM: 0 };
+    for (i = 1; i < line.length; i++) total += distanceM(line[i - 1][0], line[i - 1][1], line[i][0], line[i][1]);
+    var step = Math.max(stepM || ROUTE.stepM, total / ROUTE.maxPts), run = 0, carry = 0;
+    out.push({ lat: line[0][0], lng: line[0][1], d: 0 });
+    for (i = 1; i < line.length; i++) {
+      var a = line[i - 1], b = line[i], seg = distanceM(a[0], a[1], b[0], b[1]), pos = step - carry;
+      while (pos <= seg) {
+        var f = pos / seg;
+        out.push({ lat: a[0] + (b[0] - a[0]) * f, lng: a[1] + (b[1] - a[1]) * f, d: run + pos });
+        pos += step;
+      }
+      carry = seg - (pos - step);
+      run += seg;
+    }
+    var last = line[line.length - 1];
+    if (total - out[out.length - 1].d > 1) out.push({ lat: last[0], lng: last[1], d: total });
+    return { pts: out, lengthM: total };
+  }
+  // Run the wind along a walk. pts from resampleLine, drawn from the truck to the stand, each with an optional
+  // terrain {slopeDeg, aspectDeg} for its thermals. o.dir 'in': you reach the stand at o.t0 (local minutes);
+  // 'out': you leave the stand at o.t0 and walk the line backwards. o.marks: the hunter's marks.
+  // Returns { samples: [{lat,lng,d,t,from,to,speed,reachM,bad}], hits: [{mark,dM,t,n}], lengthM, minutes, start, end }.
+  function routeScent(pts, fc, o) {
+    var v = o.walkMps || ROUTE.walkMps, L = pts.length ? pts[pts.length - 1].d : 0, out = o.dir === 'out';
+    var marks = (o.marks || []).filter(function (m) { return ROUTE.sign.indexOf(m.type) >= 0; });
+    var samples = [], hits = {};
+    pts.forEach(function (p) {
+      var t = out ? o.t0 + (L - p.d) / v / 60 : o.t0 - (L - p.d) / v / 60;
+      var st = stateAt({ lat: p.lat, lng: p.lng, terrain: p.terrain || { slopeDeg: 0, aspectDeg: null }, winds: {} }, fc, t);
+      var to = norm(st.eff.from + 180), spd = st.eff.speed, bad = [];
+      // the last few yards are the stand's own scent, which the stand ranking already weighs
+      if (L - p.d > ROUTE.quietEndM) marks.forEach(function (m) {
+        var d = inScent(p.lat, p.lng, to, spd, m.lat, m.lng);
+        if (d < 0) return;
+        bad.push(m.id);
+        var hh = hits[m.id];
+        if (!hh) hits[m.id] = { mark: m, dM: d, t: t, n: 1 };
+        else { hh.n++; if (d < hh.dM) { hh.dM = d; hh.t = t; } }
+      });
+      samples.push({ lat: p.lat, lng: p.lng, d: p.d, t: t, from: st.eff.from, to: to, speed: spd, reachM: scentReach(spd), bad: bad });
+    });
+    var ts = samples.map(function (s) { return s.t; });
+    return {
+      samples: samples, lengthM: L, minutes: L / v / 60,
+      hits: Object.keys(hits).map(function (k) { return hits[k]; }).sort(function (a, b) { return a.t - b.t; }),
+      start: ts.length ? Math.min.apply(null, ts) : null, end: ts.length ? Math.max.apply(null, ts) : null
+    };
+  }
+
+  /* ---------- stand-site suggestions ----------
+   * Candidates are terrain features (saddles, funnels, benches) and crossings the hunter marked. Each is scored
+   * on the feature, on sitting between marked bedding and food, on fresh sign close by, and on the winds that
+   * keep scent off the bedding and food. All estimates from the ground shape and the hunter's own marks. */
+  var SITES = { bedM: 500, foodM: 800, signM: 90, tooCloseBedM: 65, standGapM: 80, spacingM: 120, max: 6,
+    base: { saddle: 0.35, funnel: 0.35, crossing: 0.35, bench: 0.25 } };
+  var SITE_FOOD = ['food', 'plot', 'water', 'feeder'], SITE_SIGN = ['scrape', 'rub', 'trail', 'sighting'];
+  function nearestOf(c, list) {
+    var best = null;
+    list.forEach(function (m) { var d = distanceM(c.lat, c.lng, m.lat, m.lng); if (!best || d < best.d) best = { m: m, d: d, b: bearingTo(c.lat, c.lng, m.lat, m.lng) }; });
+    return best;
+  }
+  // cands: [{ kind, lat, lng, widthM?, depthM? }]; marks: the hunter's marks; o: { stands, windFrom }
+  // -> [{ lat, lng, kind, score (0-1), why: [text], goodWinds: ['N', ...] or null, windOk: bool|null }], best first.
+  function standSites(cands, marks, o) {
+    o = o || {};
+    var beds = (marks || []).filter(function (m) { return m.type === 'bed'; });
+    var food = (marks || []).filter(function (m) { return SITE_FOOD.indexOf(m.type) >= 0; });
+    var sign = (marks || []).filter(function (m) { return SITE_SIGN.indexOf(m.type) >= 0; });
+    var yd = function (m) { return Math.round(yards(m) / 5) * 5 + ' yd'; };
+    var all = cands.concat((marks || []).filter(function (m) { return m.type === 'crossing'; }).map(function (m) { return { kind: 'crossing', lat: m.lat, lng: m.lng, name: m.name }; }));
+    var out = [];
+    all.forEach(function (c) {
+      if ((o.stands || []).some(function (s) { return distanceM(c.lat, c.lng, s.lat, s.lng) < SITES.standGapM; })) return;
+      var score = SITES.base[c.kind] || 0.2, why = [];
+      why.push(c.kind === 'saddle' ? 'Saddle: a low gap in the ridge that deer cross through.'
+        : c.kind === 'funnel' ? 'Funnel: walkable ground squeezed to about ' + yd(c.widthM || 30) + ' wide.'
+        : c.kind === 'bench' ? 'Bench: a flat strip part-way up the hill that deer travel along.'
+        : 'A crossing you marked' + (c.name ? ' ("' + c.name + '")' : '') + '.');
+      var b = nearestOf(c, beds), f = nearestOf(c, food);
+      b = b && b.d <= SITES.bedM ? b : null; f = f && f.d <= SITES.foodM ? f : null;
+      if (b && f && angDiff(b.b, f.b) >= 100) { score += 0.3; why.push('Between your bedding (' + yd(b.d) + ' ' + compass(b.b) + ') and food (' + yd(f.d) + ' ' + compass(f.b) + ').'); }
+      else if (b) { score += 0.1; why.push('Bedding ' + yd(b.d) + ' to the ' + compass(b.b) + '.'); }
+      else if (f) { score += 0.08; why.push('Food ' + yd(f.d) + ' to the ' + compass(f.b) + '.'); }
+      if (b && b.d < SITES.tooCloseBedM) { score -= 0.2; why.push('Very close to bedding, so it is easy to bump deer getting in.'); }
+      var near = sign.filter(function (m) { return distanceM(c.lat, c.lng, m.lat, m.lng) <= SITES.signM; }).length;
+      if (near) { score += Math.min(0.3, 0.1 * near); why.push(near + (near === 1 ? ' sign mark' : ' sign marks') + ' within ' + yd(SITES.signM) + '.'); }
+      // good winds: ones that carry scent at least 90 degrees away from the bedding and the food
+      var keep = [b, f].filter(Boolean), goodWinds = null, windOk = null;
+      if (keep.length) {
+        goodWinds = SECTORS.filter(function (d, k) { var to = norm(k * 45 + 180); return keep.every(function (x) { return angDiff(to, x.b) >= 90; }); });
+        if (o.windFrom != null) {
+          windOk = goodWinds.some(function (d) { return angDiff(SECTORS.indexOf(d) * 45, o.windFrom) <= 22.5; });
+          score += windOk ? 0.15 : -0.1;
+        }
+      }
+      out.push({ lat: c.lat, lng: c.lng, kind: c.kind, score: clamp(score, 0, 1), why: why, goodWinds: goodWinds, windOk: windOk });
+    });
+    out.sort(function (a, b2) { return b2.score - a.score; });
+    var kept = [];
+    out.forEach(function (s) { if (kept.length < SITES.max && !kept.some(function (k) { return distanceM(s.lat, s.lng, k.lat, k.lng) < SITES.spacingM; })) kept.push(s); });
+    return kept;
+  }
+
   /* ---------- map geometry ---------- */
 
   // Scent cone: where scent travels from the stand. Narrows and lengthens as the wind picks up;
@@ -1064,6 +1188,7 @@
     SECTORS: SECTORS, DEG: DEG,
     clamp: clamp, norm: norm, angDiff: angDiff, mean: mean, compass: compass,
     checkSit: checkSit, sitRecord: sitRecord, windFixFrom: windFixFrom, fixDeg: fixDeg, FIX: FIX,
+    ROUTE: ROUTE, bearingTo: bearingTo, scentReach: scentReach, inScent: inScent, resampleLine: resampleLine, routeScent: routeScent, standSites: standSites, SITES: SITES,
     toVec: toVec, fromVec: fromVec, distanceM: distanceM, yards: yards, fmtYards: fmtYards,
     parseLocalMin: parseLocalMin, dateKey: dateKey, fmtClock: fmtClock, fmtDayClock: fmtDayClock, fmtHour: fmtHour, dayDiff: dayDiff,
     solarPosition: solarPosition,

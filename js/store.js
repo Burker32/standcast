@@ -11,7 +11,7 @@
   function fresh() {
     return {
       v: 1, stands: [], marks: [],
-      settings: { basemap: 'imagery', layers: { wind: true, thermal: true, field: true, swirl: true, animate: true, publand: true, cone: true, marks: true }, view: DEFAULT_VIEW,
+      settings: { basemap: 'imagery', layers: { wind: true, thermal: true, field: true, swirl: true, animate: true, publand: true, cone: true, marks: true, rings: true }, view: DEFAULT_VIEW,
         backup: { at: 0, sig: null, snooze: 0 } }   // when the last backup was saved, what it held, and "remind me later" until
     };
   }
@@ -119,6 +119,7 @@
   function removeMark(id) {
     var m = getMark(id);
     if (m && m.photoId) deletePhoto(m.photoId);
+    if (m && m.shots) m.shots.forEach(function (x) { deletePhoto(x.id); });
     state.marks = state.marks.filter(function (x) { return x.id !== id; }); save();
   }
 
@@ -133,10 +134,12 @@
   }
   function exportAll() {
     var copy = JSON.parse(JSON.stringify(state));
+    var asData = function (id) { return getPhoto(id).then(function (b) { return b ? blobToDataUrl(b) : null; }).catch(function () { return null; }); };
     return Promise.all(copy.marks.map(function (m) {
-      if (!m.photoId) return null;
-      return getPhoto(m.photoId).then(function (b) { return b ? blobToDataUrl(b) : null; })
-        .then(function (d) { m.photoData = d; });
+      // camera photos ride along as data inside each entry (x.data)
+      var shots = Promise.all((m.shots || []).map(function (x) { return asData(x.id).then(function (d) { x.data = d; }); }));
+      if (!m.photoId) return shots;
+      return Promise.all([shots, asData(m.photoId).then(function (d) { m.photoData = d; })]);
     })).then(function () {
       return new Blob([JSON.stringify({ app: 'standcast', exportedAt: new Date().toISOString(), data: copy }, null, 1)], { type: 'application/json' });
     });
@@ -151,8 +154,8 @@
   function dataSig() {
     var r = realItems();
     var text = JSON.stringify([
-      r.stands.map(function (s) { return [s.id, s.name, s.type, s.lat, s.lng, s.winds, s.notes, s.override, s.sits, s.windFix]; }),
-      r.marks.map(function (m) { return [m.id, m.type, m.lat, m.lng, m.name || '', m.note, m.photoId]; })
+      r.stands.map(function (s) { return [s.id, s.name, s.type, s.lat, s.lng, s.winds, s.notes, s.override, s.sits, s.windFix, s.routes]; }),
+      r.marks.map(function (m) { return [m.id, m.type, m.lat, m.lng, m.name || '', m.note, m.photoId, (m.shots || []).length]; })
     ]);
     var hash = 5381;
     for (var i = 0; i < text.length; i++) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
@@ -197,7 +200,12 @@
       if (data) {
         p = fetch(data).then(function (r) { return r.blob(); }).then(putPhoto).then(function (id) { m.photoId = id; });
       } else { m.photoId = null; }
-      return p.catch(function () { m.photoId = null; }).then(function () { state.marks.push(m); added.marks++; });
+      p = p.catch(function () { m.photoId = null; });
+      var shots = Promise.all((m.shots || []).map(function (x) {
+        var d = x.data; delete x.data;
+        return d ? fetch(d).then(function (r) { return r.blob(); }).then(putPhoto).then(function (id) { x.id = id; }, function () { x.id = null; }) : (x.id = null);
+      })).then(function () { if (m.shots) m.shots = m.shots.filter(function (x) { return x.id; }); });
+      return Promise.all([p, shots]).then(function () { state.marks.push(m); added.marks++; });
     })).then(function () {
       save();
       if (wasEmpty) markBackedUp();   // everything here just came from a backup file
@@ -205,7 +213,7 @@
     });
   }
   function clearAll() {
-    state.marks.forEach(function (m) { if (m.photoId) deletePhoto(m.photoId); });
+    state.marks.forEach(function (m) { if (m.photoId) deletePhoto(m.photoId); (m.shots || []).forEach(function (x) { deletePhoto(x.id); }); });
     var view = state.settings;
     state = fresh(); state.settings = view; save();
   }

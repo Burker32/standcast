@@ -54,6 +54,7 @@
         <button type="button" class="btn small" data-m="me">From me</button>
         <button type="button" class="btn small" data-m="undo">Undo</button>
         <button type="button" class="btn small" data-m="clear">Clear</button>
+        <button type="button" class="btn small" data-m="cancel" hidden>Cancel</button>
         <button type="button" class="btn small primary" data-m="done">Done</button>
       </div>
     </div>
@@ -130,6 +131,7 @@
       <label class="check"><input type="checkbox" data-layer="animate"><span class="sw sw-anim"></span>Moving air (animation)</label>
       <label class="check"><input type="checkbox" data-layer="swirl"><span class="sw sw-swirl"></span>Swirl spots (estimated)</label>
       <label class="check"><input type="checkbox" data-layer="cone"><span class="sw sw-cone"></span>Scent cones</label>
+      <label class="check"><input type="checkbox" data-layer="rings"><span class="sw sw-rings"></span>Bow range rings (20, 30, 40 yd)</label>
       <label class="check"><input type="checkbox" data-layer="publand"><span class="sw sw-land"></span>Public land (PAD-US)</label>
       <div class="land-key" aria-hidden="true"><span><i style="--c:#f2b134"></i>Federal</span><span><i style="--c:#3fa7d6"></i>State</span><span><i style="--c:#a57fe0"></i>Local</span><span><i class="dash"></i>Restricted</span></div>
       <label class="check"><input type="checkbox" data-layer="marks"><span class="sw sw-marks"></span>Marks and photos</label>
@@ -177,6 +179,8 @@
     <input id="file-photo" type="file" accept="image/*" hidden>
     <input id="file-camera" type="file" accept="image/*" capture="environment" hidden>
     <input id="file-import" type="file" accept="application/json,.json" hidden>
+    <input id="file-pins" type="file" hidden>
+    <input id="file-shots" type="file" accept="image/*" multiple hidden>
   </main>
 
   <script src="vendor/leaflet/leaflet.js"></script>
@@ -189,6 +193,7 @@
   <script src="js/exif.js"></script>
   <script src="js/marktypes.js"></script>
   <script src="js/store.js"></script>
+  <script src="js/pins.js"></script>
   <script src="js/weather.js"></script>
   <script src="js/map.js"></script>
   <script src="js/flow.js"></script>

@@ -363,6 +363,29 @@ textarea { resize: vertical; min-height: 96px; line-height: 1.4; }
 .record-main { margin: 0 0 2px; font-size: 15px; }
 .note.good { border-color: var(--good); }
 .why.record-line::before { background: var(--good); }
+.row-wrap { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.route-sum { padding: 8px 10px; margin: 6px 0; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); display: flex; flex-direction: column; gap: 3px; }
+.route-sum.good { border-color: color-mix(in srgb, var(--good) 45%, var(--line)); }
+.route-sum.bad { border-color: color-mix(in srgb, var(--bad) 55%, var(--line)); }
+.route-sum .line { margin: 0; }
+.measurebar.is-route { border-color: #ff8a1f; }
+.zoom-low .range-ring { display: none; }
+.site-pin { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: #ffd23f; color: #1b1b1b; border: 2px solid #1b1b1b; font: 800 14px/1 var(--display); box-shadow: 0 2px 6px rgba(0, 0, 0, .45); }
+.site-head .site-pin { width: 24px; height: 24px; font-size: 12px; box-shadow: none; flex: none; }
+.site-card { padding: 10px 12px; margin: 8px 0; border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2); display: flex; flex-direction: column; gap: 4px; }
+.site-card.on { border-color: #ffd23f; box-shadow: 0 0 0 2px #ffd23f inset; }
+.site-card .line { margin: 0; font-size: 14px; }
+.site-head { display: flex; align-items: center; gap: 8px; }
+.site-score { margin-left: auto; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--c, inherit); }
+.sec-head { margin: 14px 0 6px; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted, inherit); opacity: .85; }
+.gallery.shots { margin: 6px 0 10px; }
+.gal-when { position: absolute; left: 4px; right: 4px; bottom: 4px; font-size: 10px; font-weight: 700; color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; text-align: left; white-space: nowrap; overflow: hidden; }
+.imp-list { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 12px; }
+.imp-row { display: flex; align-items: center; gap: 8px; }
+.imp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.imp-row select { flex: none; width: 46%; min-height: 36px; }
+.ring-lab span { position: absolute; transform: translate(-50%, -50%); font: 700 10px/1 var(--display); color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; white-space: nowrap; }
+.sw-rings { border: 2px solid currentColor; border-radius: 50%; background: transparent !important; }
 
 /* marks */
 .type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px; }
