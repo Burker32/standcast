@@ -11,14 +11,14 @@ A bowhunting app that answers "which stand tonight?" It models wind, thermals, s
   2. Bump `VERSION` in `sw.js`.
   3. Run `npm test`, and `node --check` on each edited JS file.
   4. Commit and push to `main`. GitHub Pages rebuilds the site by itself, usually within a minute or two.
-- **Every deploy must bump `VERSION` in `sw.js`** (currently `'v40'`). The service worker serves cache-first, so phones keep the old app until the version changes. After a deploy, the owner closes and reopens the app once.
+- **Every deploy must bump `VERSION` in `sw.js`** (currently `'v41'`). The service worker serves cache-first, so phones keep the old app until the version changes. After a deploy, the owner closes and reopens the app once.
 - The app is served from the `/standcast/` subfolder, so every path in `index.html`, `manifest.webmanifest` and `sw.js` must stay relative (no leading `/`).
 - The repo is public. `CLAUDE.local.md` and zip files are kept out by `.gitignore`. Check `git status` before committing so nothing private goes up.
 - The empty `.nojekyll` file tells GitHub Pages to serve the files as they are.
 
 ## Files
 
-Scripts load in this order in `index.html`: engine, exif, marktypes, store, weather, map, flow, publand, roads, labels, search, app. Each file attaches to `window.SC`.
+Scripts load in this order in `index.html`: engine, exif, marktypes, store, weather, map, flow, publand, roads, parcels, labels, search, app. Each file attaches to `window.SC`.
 
 - **`js/engine.js`:** pure math with no DOM or network, so it's unit-testable.
   - Wind vectors and scent cones.
@@ -55,6 +55,7 @@ Scripts load in this order in `index.html`: engine, exif, marktypes, store, weat
 - **`js/publand.js`:** public land boundaries from the PAD-US 4.1 FeatureServer (Esri), fetched in 0.1° cells at zoom 11 or more.
   - Drawn as outlines only (a dark halo under a colored line), with an invisible fill so the area can be tapped.
   - Colors by manager type. Names like "Conservation Area" count as state land.
+- **`js/parcels.js`:** private property lines with owner names, Wisconsin only: the Wisconsin Statewide Parcel Map V12 FeatureServer on services3.arcgis.com (fields `OWNERNME1`, `GISACRES`, `PARCELID`...). Zoom 14 and up, 0.02 degree cells, one merged `noClip` polygon outline, `pick()` is a point-in-polygon test called after roads in the map tap handler. `SOURCES` holds one row per state; Missouri has no statewide public parcel layer (counties use vendor viewers such as Integrity GIS), so adding it needs a county's permission or a licensed provider. Showing owner names commercially is legal question 7 in the launch brief.
 - **`js/labels.js`:** town and public land names written on every basemap, on by default (`overlays.names !== false`). Level of detail by zoom: state names far out, then towns by 2020 census population from TIGERweb (`minPop()`: 250k at zoom 6 down to everything at zoom 12), then GNIS small communities at zoom 12 or more; public land from zoom 9, biggest first. Town and state names are skipped on the topo and hybrid maps, which print their own. Public land names from PAD-US, placed on the visible part of the unit. Overlapping names are dropped; at most 26 show. The bigger town wins a collision. The raster `labels` overlay in `map.js` is now road names and route shields only.
 - **`js/roads.js`:** roads and trails as vector lines over any basemap, from the USGS transportation MapServer. Three levels by zoom: below 11, main highways from the small-scale layers (8 below zoom 8.5, then 9 filtered to numbered routes); 11 to 13, layers 29, 30, 31 in 0.2 degree cells (`MID`); 13 and up, layers 29 to 33 plus 35, 36 (4WD and closed, dashed) and 37 (trails, dotted) in 0.05 degree cells (`FULL`). All lines of one kind are merged into a single `noClip` polyline; thousands of separate lines made panning jerky. The previous level stays on screen until the new one has loaded. `pages()` follows `exceededTransferLimit`. `shields()` writes route numbers about every 5 miles and at least 92 px apart. `pick()` matches a tap to a road, called from the map tap handler in `app.js`. Not cached offline.
 - **Creeks and rivers:** the `hydro` overlay in `map.js` is the USGS `USGSHydroCached` tile set (NHD drawn as blue lines, dashed for intermittent). The NHD and 3DHP vector services on hydro.nationalmap.gov timed out at 30 s or more when tried in Oct 2026, so they are not used.

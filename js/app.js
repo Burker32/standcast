@@ -1193,6 +1193,7 @@
       h('p', { class: 'line' }, 'Overlays (Map layers): Lidar terrain is USGS laser-scanned ground shape blended into the photo, so ridges, benches, saddles, ditches and old roads stand out even under timber. Crops 2025 is USDA CropScape: what was grown in each field last season (corn, soybeans, wheat, hay and so on). Each has its own strength slider and works on any base map.'),
       h('p', { class: 'line' }, 'Find a place with the magnifier at the top: type a town, lake, creek, landform or piece of public land anywhere in the country and tap a result to go there. Add a state, like “Stockton WI”, to narrow it. Coordinates such as 37.8096, -93.6250 work too. For a street address, give the town and state or a ZIP, like “100 South St, Stockton, MO”. Road names are searched within about 25 miles of where the map is looking.'),
       h('p', { class: 'line' }, 'Roads and trails (Map layers) draws lines over any map: a solid line is a road, long dashes are a 4WD or closed road, and dots are a trail. Tap a line for its name. It comes from national road and trail records, so many woods roads and most unofficial trails are missing. Route numbers are written about every 5 miles along a highway. Road names adds the name of each road.'),
+      h('p', { class: 'line' }, 'Property lines and owners (Map layers) draws private parcel lines in thin white when you are zoomed in. Tap inside one for the owner, acres and parcel number. It covers Wisconsin so far, from the state\'s public parcel map. Missouri has no statewide public parcel map; each county keeps its own. Tax map lines are not surveys, so get permission before you step over one.'),
       h('p', { class: 'line' }, 'Creeks and rivers (Map layers) draws the national stream records in blue over any map: a solid line runs year-round, a dashed line runs part of the year, and named streams are labelled. Roads and streams come from national records, good to within several yards in most places but not surveyed, so a creek or woods road can sit a little off its true line.'),
       h('p', { class: 'line' }, 'Town names and the names of public land are written on every map. Towns show in white and public land in pale green italics; far out you see state names and big cities, and smaller towns and public land appear as you zoom in. Names that would overlap are left out, the bigger town winning. Roads work the same way: main highways when zoomed out, local roads and trails up close. Switch them off under Map layers (Town and public land names).'),
       h('p', { class: 'line' }, 'Benches (Map layers) shades flat strips part-way up a hillside: ground that is clearly flatter than the slope above and below it. It is worked out from the lidar ground data for the area on screen, so zoom in to use it. It only knows the shape of the ground, so treat it as places worth walking, not proof deer travel there.'),
@@ -1231,7 +1232,7 @@
       h('p', { class: 'line' }, 'Deletes every stand, mark and photo on this device.'),
       confirmTwice('Erase everything', () => { S.clearAll(); ui.selStand = ui.selMark = null; data.fc = {}; toast('All data erased'); recompute(); go('list', { tab: 'stands' }); })));
     root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Data and credits'),
-      h('p', { class: 'fine' }, 'Forecast: U.S. National Weather Service (weather.gov). Sunrise, sunset and sunshine are worked out in the app from the sun\'s position and the forecast cloud. Ground elevation: USGS 3D Elevation Program (lidar). Maps: U.S. Geological Survey, The National Map; Missouri leaf-off imagery: MSDIS. Wisconsin leaf-off imagery: Wisconsin DNR and the Wisconsin Regional Orthophoto Consortium. Place names and roads: USGS. Crops: USDA NASS Cropland Data Layer. Public land: USGS PAD-US. Mapping library: Leaflet with leaflet-rotate.')));
+      h('p', { class: 'fine' }, 'Forecast: U.S. National Weather Service (weather.gov). Sunrise, sunset and sunshine are worked out in the app from the sun\'s position and the forecast cloud. Ground elevation: USGS 3D Elevation Program (lidar). Maps: U.S. Geological Survey, The National Map; Missouri leaf-off imagery: MSDIS. Wisconsin leaf-off imagery: Wisconsin DNR and the Wisconsin Regional Orthophoto Consortium. Wisconsin property lines and owners: Wisconsin Statewide Parcel Map (V12), State Cartographer\'s Office and Department of Administration. Place names and roads: USGS. Crops: USDA NASS Cropland Data Layer. Public land: USGS PAD-US. Mapping library: Leaflet with leaflet-rotate.')));
     return root;
   }
 
@@ -1257,6 +1258,7 @@
       const st = settings(); st.overlays = st.overlays || {}; st.overlays[c.dataset.ov] = c.checked; S.save(); applyOverlays(); syncLayerUi();
       if (c.checked && (c.dataset.ov === 'hillshade' || c.dataset.ov === 'contours')) toast((c.dataset.ov === 'contours' ? 'Contours' : 'Lidar terrain') + ' draw on demand, so give it a few seconds the first time.');
       if (c.checked && c.dataset.ov === 'contours' && M.zoom < 13) toast('Zoom in closer to see the 10 ft contour lines.');
+      if (c.checked && c.dataset.ov === 'parcels') toast(!SC.parcels.covered() ? 'Property lines are available in Wisconsin so far. Missouri counties keep their own records.' : M.zoom < SC.parcels.MIN_ZOOM ? 'Zoom in closer to see property lines.' : 'Loading property lines. Tap inside one for the owner.');
       if (c.checked && c.dataset.ov === 'roadlines') toast(M.zoom < SC.roads.MIN_ZOOM ? 'Showing main highways. Zoom in for local roads and trails.' : 'Loading roads and trails. Tap a line for its name.');
       if (c.checked && c.dataset.ov === 'hydro' && M.zoom < 9) toast('Zoom in to see creeks and rivers.');
       if (c.checked && c.dataset.ov === 'labels') toast(M.zoom < 12 ? 'Zoom in closer to see road names.' : 'Road names draw on demand, so give them a few seconds.');
@@ -1302,6 +1304,22 @@
     if (!info) return false;
     toast(info.kind === 'trail' ? [info.name || 'Trail (no name listed)', info.number ? 'no. ' + info.number : null, info.surface ? info.surface.toLowerCase() + ' surface' : null].filter(Boolean).join(', ')
       : (info.name || 'No name listed') + ' (' + info.label.toLowerCase() + ')');
+    return true;
+  }
+  // A tap inside a property line (when that layer is on) shows who owns it. True if there was one there.
+  function parcelAt(ll) {
+    const p = SC.parcels && ll ? SC.parcels.pick(ll) : null;
+    if (!p) return false;
+    const card = $('landcard'), acres = p.acres != null ? p.acres : p.deedAcres;
+    card.replaceChildren.apply(card, [
+      h('div', { class: 'lc-top' }, h('h3', null, p.owner || 'Owner not listed'),
+        h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Close', onclick: () => { card.hidden = true; } }, icon('close', 18))),
+      p.owner2 ? h('div', null, p.owner2) : null,
+      h('div', null, h('span', { class: 'lc-tag' }, 'Private parcel'), acres != null ? h('span', { class: 'dim' }, '  ' + (Math.round(acres * 10) / 10).toLocaleString() + ' acres') : null),
+      h('div', { class: 'dim' }, [p.address, p.county ? p.county.charAt(0) + p.county.slice(1).toLowerCase() + ' County' : null, p.id ? 'Parcel ' + p.id : null].filter(Boolean).join('  ·  ')),
+      h('p', { class: 'lc-fine' }, 'From ' + p.credit + '. Tax map lines are not surveys and can be off on the ground. Get the owner\'s permission before entering private land.')
+    ].filter(Boolean));   // replaceChildren would print a missing line as the word "null"
+    card.hidden = false;
     return true;
   }
   /* ---- place search ---- */
@@ -1363,6 +1381,7 @@
     const on = settings().overlays || {};
     ['hillshade', 'contours', 'crops', 'labels', 'hydro'].forEach((n) => M.setOverlay(n, !!on[n], ovOpacity(n)));
     if (SC.roads) SC.roads.setEnabled(!!on.roadlines);
+    if (SC.parcels) SC.parcels.setEnabled(!!on.parcels);
     if (SC.labels) SC.labels.setEnabled(on.names !== false);   // on unless switched off
     loadBenches(); loadSpots();
   }
@@ -1520,7 +1539,7 @@
     let saveTimer = null;
     M.init('map', {
       view: settings().view, basemap: settings().basemap,
-      onTap: (ll) => { if (ui.measure) addMeasurePoint(ll.lat, ll.lng); else if (ui.placing) placeAt(ll.lat, ll.lng); else if (!tapCancels()) roadAt(ll); },
+      onTap: (ll) => { if (ui.measure) addMeasurePoint(ll.lat, ll.lng); else if (ui.placing) placeAt(ll.lat, ll.lng); else if (!tapCancels() && !roadAt(ll)) parcelAt(ll); },
       onHold: (ll) => holdAt(ll.lat, ll.lng),
       onSelectStand: (id) => { if (ui.measure) { const s = S.getStand(id); if (s) addMeasurePoint(s.lat, s.lng); } else if (!ui.placing) selectStand(id); },
       onSelectMark: (id) => { if (ui.measure) { const m = S.getMark(id); if (m) addMeasurePoint(m.lat, m.lng); } else if (!ui.placing) selectMark(id); },
@@ -1540,6 +1559,8 @@
     // The topo and hybrid maps already print town names, so ours are only added on the photo maps.
     try { if (SC.labels && M.leaflet) SC.labels.attach(M.leaflet, { showTowns: () => settings().basemap !== 'topo' && settings().basemap !== 'hybrid' }); }
     catch (e) { console.warn('map names off', e); }
+    try { if (SC.parcels && M.leaflet) SC.parcels.attach(M.leaflet, { onStatus: (st) => { if (st === 'error') toast('Could not load property lines. Check your signal.'); } }); }
+    catch (e) { console.warn('property lines off', e); }
     try { if (SC.roads && M.leaflet) {
       SC.roads.attach(M.leaflet, {
         onStatus: (st) => { if (st === 'error') toast('Could not load roads and trails. Check your signal.'); }
