@@ -11,7 +11,7 @@ A bowhunting app that answers "which stand tonight?" It models wind, thermals, s
   2. Bump `VERSION` in `sw.js`.
   3. Run `npm test`, and `node --check` on each edited JS file.
   4. Commit and push to `main`. GitHub Pages rebuilds the site by itself, usually within a minute or two.
-- **Every deploy must bump `VERSION` in `sw.js`** (currently `'v41'`). The service worker serves cache-first, so phones keep the old app until the version changes. After a deploy, the owner closes and reopens the app once.
+- **Every deploy must bump `VERSION` in `sw.js`** (currently `'v42'`). The service worker serves cache-first, so phones keep the old app until the version changes. After a deploy, the owner closes and reopens the app once.
 - The app is served from the `/standcast/` subfolder, so every path in `index.html`, `manifest.webmanifest` and `sw.js` must stay relative (no leading `/`).
 - The repo is public. `CLAUDE.local.md` and zip files are kept out by `.gitignore`. Check `git status` before committing so nothing private goes up.
 - The empty `.nojekyll` file tells GitHub Pages to serve the files as they are.
@@ -32,6 +32,7 @@ Scripts load in this order in `index.html`: engine, exif, marktypes, store, weat
     - Pass 3 picks peaks, giving ring radius `rM = spacing*(0.22+0.12*score)`.
   - `findSpots()`: saddles (walk a circle round a spot and the ground goes up, down, up, down) and funnels (walkable ground 18 to 55 m wide pinched between steep slopes or dead-level lidar water). Returns only the strongest few, spaced apart; thresholds in `SPOTS`. Uses zoom-15 elevation squares. `map.js` `renderSpots()` draws them as small badges and `app.js` `showSpot()` explains a tapped one.
   - `distanceM`/`fmtYards`: distances for the measure tool.
+  - Sit log scoring: `checkSit()` judges one logged sit (the hunter's wind check `obs`, a compass point or `calm`/`swirl`, against the saved call `pred`; a match is within 45°). `sitRecord()` is a stand's track record. `windFixFrom()` learns a stand's steady turn from the last 12 compass checks (at least 3 that agree, shrunk while few, at most 45°, `FIX`). It is saved as `stand.windFix = {deg, n, off}` and `stateAt()` adds it to the effective wind.
 - **`js/weather.js`:**
   - Forecast from the U.S. National Weather Service (`api.weather.gov`): `/points/lat,lng` gives the grid square (remembered in `standcast.nwspoint.v1`), then the gridpoint data, turned into the engine's hourly object by `engine.forecastFromNws()`. NWS has no sunshine or sun times, so `estimateShortwave()` and `sunTimes()` work them out. U.S. only. Retry and `forecastBusy` gating as before. Open-Meteo was dropped in v40 because its free service is non-commercial only.
   - Ground elevation comes from USGS 3DEP 1 m lidar through an ImageServer `getSamples` POST. There is no fallback source. Cache key is `standcast.elev.v2`.
@@ -67,6 +68,7 @@ Scripts load in this order in `index.html`: engine, exif, marktypes, store, weat
 - **`js/app.js`:** the UI.
   - Bottom sheet with drag and flick.
   - Stand ranking.
+  - Sit log and wind checks: `snapPreds()` saves each stand's call for today's sits in `standcast.preds.v1` (it stops updating 30 minutes into the sit, and entries are kept 10 days). Logging a sit copies that call into the sit as `pred` (or works it out from the forecast if that still covers the day), with `kind` (AM/PM), `obs` and `outcome` (range, seen, busted, none). `saveSits()` updates `windFix`. The track record shows on the stand and on its ranking card.
   - `drawField` renders arrows, cones and swirls.
   - Compass, locate and follow button, measure mode (yards).
   - Overlay switches (`OV_DEFAULT`), and the base button that cycles Summer, Leaf-off and Topo.

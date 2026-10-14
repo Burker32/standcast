@@ -489,3 +489,56 @@ test('NWS forecast: time spans become hourly values in mph, degrees F and local 
   assert.ok(ev.score > 0 && ev.score <= 100 && ev.reasons.length > 0);
   assert.throws(() => E.forecastFromNws({ windSpeed: { values: [] } }, -18000, 37.7, -93.8, now), /no wind/);
 });
+test('sit log: matches, misses and the track record', () => {
+  const pred = (from, extra) => Object.assign({ from, raw: from, speed: 7, swirl: 0 }, extra);
+  assert.equal(E.checkSit({ obs: 'NW', pred: pred(300) }).hit, true);
+  assert.equal(E.checkSit({ obs: 'W', pred: pred(300) }).hit, true);     // 30° off: within a compass point
+  assert.equal(E.checkSit({ obs: 'N', pred: pred(300) }).hit, false);    // 60° off
+  assert.equal(E.checkSit({ obs: 'S', pred: pred(10) }).hit, false);
+  near(E.checkSit({ obs: 'N', pred: pred(340) }).off, 20, 0.001);        // real air sat 20° clockwise of the call
+  near(E.checkSit({ obs: 'NW', pred: pred(10) }).off, -55, 0.001);
+  assert.equal(E.checkSit({ obs: 'calm', pred: pred(0, { speed: 2 }) }).hit, true);
+  assert.equal(E.checkSit({ obs: 'calm', pred: pred(0, { speed: 9 }) }).hit, false);
+  assert.equal(E.checkSit({ obs: 'swirl', pred: pred(0, { swirl: 0.5 }) }).hit, true);
+  assert.equal(E.checkSit({ obs: 'swirl', pred: pred(0) }).hit, false);
+  assert.equal(E.checkSit({ obs: 'NW' }), null);                         // no prediction saved: cannot judge
+  assert.equal(E.checkSit({ pred: pred(0) }), null);                     // wind not checked
+  assert.equal(E.checkSit({ date: '2026-10-01', deer: 2 }), null);       // old style sit
+
+  const r = E.sitRecord([
+    { kind: 'PM', obs: 'NW', pred: pred(310), outcome: 'range' },
+    { kind: 'PM', obs: 'S', pred: pred(310), outcome: 'busted' },
+    { kind: 'AM', obs: 'calm', pred: pred(0, { speed: 1 }), outcome: 'none' },
+    { kind: 'AM', outcome: 'seen' },
+    { date: '2026-09-30', deer: 1 }
+  ]);
+  assert.equal(r.sits, 5); assert.equal(r.checks, 3); assert.equal(r.hits, 2);
+  assert.deepEqual(r.PM, { checks: 2, hits: 1 }); assert.deepEqual(r.AM, { checks: 1, hits: 1 });
+  assert.equal(r.busted, 1); assert.equal(r.inRange, 1);
+});
+
+test('sit log: a steady turn at one stand is learned and applied to its wind', () => {
+  const sit = (obs, raw) => ({ kind: 'PM', obs, pred: { from: raw, raw, speed: 7, swirl: 0 } });
+  // two checks are not enough
+  assert.equal(E.windFixFrom([sit('W', 225), sit('W', 225)]), null);
+  // forecast says SW, the stand keeps reading W: about +45°, shrunk while there are few checks
+  const four = E.windFixFrom([sit('W', 225), sit('W', 230), sit('W', 220), sit('W', 225)]);
+  assert.equal(four.n, 4);
+  near(four.deg, 30, 1);
+  // checks that disagree with each other teach nothing
+  assert.equal(E.windFixFrom([sit('N', 0), sit('E', 0), sit('S', 0), sit('W', 0)]), null);
+  // checks that already match teach nothing
+  assert.equal(E.windFixFrom([sit('S', 180), sit('S', 182), sit('S', 178)]), null);
+  // calm and swirl reads have no direction
+  assert.equal(E.windFixFrom([sit('calm', 0), sit('swirl', 0), sit('W', 225), sit('W', 225)]), null);
+
+  const fc = makeForecast({ speed: 10, dir: 225 });
+  const t = L('2026-10-09T12:00');
+  const flat = { lat: LAT, lng: LNG, terrain: { slopeDeg: 0, aspectDeg: null }, winds: { W: 'good', SW: 'bad' } };
+  const base = E.stateAt(flat, fc, t);
+  const fixed = E.stateAt(Object.assign({}, flat, { windFix: { deg: 30, n: 4 } }), fc, t);
+  const off = E.stateAt(Object.assign({}, flat, { windFix: { deg: 30, n: 4, off: true } }), fc, t);
+  near(E.angDiff(fixed.eff.from, base.eff.from), 30, 0.5);
+  near(off.eff.from, base.eff.from, 0.001);
+  assert.ok(fixed.rating > base.rating);
+});

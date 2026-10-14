@@ -813,7 +813,7 @@
     });
     var sw = swirl({ slopeDeg: terr.slopeDeg, aspectDeg: terr.aspectDeg, th: th, windFrom: s.from, windMph: s.speed });
     var eff = fromVec(s.u + th.u, s.v + th.v);
-    var effFrom = eff.speed < 0.2 ? s.from : eff.from;
+    var effFrom = norm((eff.speed < 0.2 ? s.from : eff.from) + fixDeg(stand));
     var raw = windRating(stand.winds, effFrom);
     var conf = clamp(eff.speed / 2.5, 0.35, 1); // direction is shaky when the air barely moves
     return {
@@ -979,6 +979,61 @@
     };
   }
 
+  /* ---------- sit log: how the wind call held up ---------- */
+
+  // The hunter's own wind checks can show that a stand's air runs a few degrees off the forecast (a draw,
+  // a point of timber). Once they agree, that turn is added to the modeled wind at this stand.
+  // stand.windFix = { deg, n, off }; off = the hunter switched it off.
+  function fixDeg(stand) {
+    var f = stand && stand.windFix;
+    return f && !f.off && isFinite(f.deg) ? f.deg : 0;
+  }
+  function signedDiff(a, b) { var d = norm(a - b); return d > 180 ? d - 360 : d; }
+  // One logged sit against the call StandCast made for it. sit.obs is a compass point ('N'..'NW'), 'calm' or 'swirl';
+  // sit.pred = { from, raw, speed, swirl } (from = the call as shown, raw = before any learned turn).
+  // Returns { hit, off } (off = degrees the real wind sat clockwise of the raw call) or null when it cannot be judged.
+  function checkSit(sit) {
+    var p = sit && sit.pred, o = sit && sit.obs;
+    if (!p || !o || !isFinite(p.from)) return null;
+    if (o === 'calm') return { hit: p.speed < 3, off: null };
+    if (o === 'swirl') return { hit: p.swirl >= 0.3 || p.speed < 3, off: null };
+    var k = SECTORS.indexOf(o);
+    if (k < 0) return null;
+    // a milkweed read is good to about one compass point, so a call within 45° counts as a match
+    return { hit: angDiff(k * 45, p.from) <= 45, off: signedDiff(k * 45, isFinite(p.raw) ? p.raw : p.from) };
+  }
+  // Track record for one stand: { checks, hits, AM: {checks, hits}, PM: {...}, sits, busted, inRange }.
+  function sitRecord(sits) {
+    var r = { checks: 0, hits: 0, AM: { checks: 0, hits: 0 }, PM: { checks: 0, hits: 0 }, sits: 0, busted: 0, inRange: 0 };
+    (sits || []).forEach(function (s) {
+      r.sits++;
+      if (s.outcome === 'busted') r.busted++;
+      if (s.outcome === 'range') r.inRange++;
+      var c = checkSit(s);
+      if (!c) return;
+      r.checks++; if (c.hit) r.hits++;
+      var k = r[s.kind];
+      if (k) { k.checks++; if (c.hit) k.hits++; }
+    });
+    return r;
+  }
+  // The steady turn between the forecast and this stand's real air, from the last 12 compass checks.
+  // Needs 3 checks that agree; shrunk toward zero while there are few, and never more than 45°.
+  // Returns { deg, n } or null when there is nothing consistent to learn.
+  var FIX = { min: 3, keep: 12, agree: 0.5, maxDeg: 45, smallDeg: 8 };
+  function windFixFrom(sits) {
+    var offs = [];
+    (sits || []).forEach(function (s) { var c = checkSit(s); if (c && c.off != null) offs.push(c.off); });
+    offs = offs.slice(-FIX.keep);
+    if (offs.length < FIX.min) return null;
+    var cs = 0, sn = 0;
+    offs.forEach(function (d) { cs += Math.cos(d * DEG); sn += Math.sin(d * DEG); });
+    if (Math.hypot(cs, sn) / offs.length < FIX.agree) return null;
+    var deg = clamp(signedDiff(Math.atan2(sn, cs) / DEG, 0) * offs.length / (offs.length + 2), -FIX.maxDeg, FIX.maxDeg);
+    if (Math.abs(deg) < FIX.smallDeg) return null;
+    return { deg: Math.round(deg), n: offs.length };
+  }
+
   /* ---------- map geometry ---------- */
 
   // Scent cone: where scent travels from the stand. Narrows and lengthens as the wind picks up;
@@ -1008,6 +1063,7 @@
   return {
     SECTORS: SECTORS, DEG: DEG,
     clamp: clamp, norm: norm, angDiff: angDiff, mean: mean, compass: compass,
+    checkSit: checkSit, sitRecord: sitRecord, windFixFrom: windFixFrom, fixDeg: fixDeg, FIX: FIX,
     toVec: toVec, fromVec: fromVec, distanceM: distanceM, yards: yards, fmtYards: fmtYards,
     parseLocalMin: parseLocalMin, dateKey: dateKey, fmtClock: fmtClock, fmtDayClock: fmtDayClock, fmtHour: fmtHour, dayDiff: dayDiff,
     solarPosition: solarPosition,

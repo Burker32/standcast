@@ -147,6 +147,7 @@
       if (win) data.evals[s.id] = E.evaluateSit(s, fc, win, now);
     });
     data.ranks = list.filter((s) => data.evals[s.id]).sort((a, b) => data.evals[b.id].score - data.evals[a.id].score).map((s) => s.id);
+    snapPreds();
     if (ui.tMin == null || ui.tMin < data.scrubMin || ui.tMin > data.scrubMax) ui.tMin = sit ? sitMid(sit) : data.scrubMin;
     renderAll();
   }
@@ -555,7 +556,8 @@
         h('span', { class: 'card-main' },
           h('span', { class: 'card-title' }, h('b', null, s.name), s.example ? h('em', { class: 'tag' }, 'Example') : null),
           h('span', { class: 'card-wind' }, arrow(E.norm(ev.summary.from + 180), 'wind', 15), windSummary(ev)),
-          why.map((r) => h('span', { class: 'why ' + r.kind }, r.text))),
+          why.map((r) => h('span', { class: 'why ' + r.kind }, r.text)),
+          recordText(s) ? h('span', { class: 'why record-line' }, recordText(s) + (E.fixDeg(s) ? ' (learned)' : '')) : null),
         h('span', { class: 'card-score' }, h('b', null, String(ev.score)), h('span', { class: ev.label.cls }, ev.label.text))));
     });
     stands().filter((s) => !data.evals[s.id]).forEach((s) => {
@@ -664,35 +666,153 @@
     if (data.ref) return E.dateKey(E.nowMinFor(data.ref));
     const d = new Date(); return d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate());
   }
-  function sitLog(s) {
-    const list = (s.sits || []).slice(-4).reverse();
-    const box = h('div', { class: 'block' }, h('h3', null, 'Sit log'));
-    if (!list.length) box.appendChild(h('p', { class: 'line dim' }, 'Log your sits so StandCast can rest a stand you just hunted.'));
-    list.forEach((x) => {
-      box.appendChild(h('div', { class: 'logrow' },
-        h('span', null, x.date + (x.deer != null && x.deer !== '' ? '  ·  ' + x.deer + ' deer' : '') + (x.note ? '  ·  ' + x.note : '')),
-        h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Remove this sit', onclick: () => {
-          S.updateStand(s.id, { sits: (s.sits || []).filter((y) => y !== x) }); recompute();
-        } }, icon('close', 16))));
+  /* ---- sit log and wind-check track record ----
+   * Before each sit, StandCast's call for every stand is saved on this device (PRED_KEY). When a sit is logged
+   * with the hunter's own wind check, that call is copied into the sit, so the two can be compared later.
+   * Once 3 or more checks agree that a stand's air runs off the forecast, the stand gets a learned turn (windFix). */
+  const PRED_KEY = 'standcast.preds.v1';
+  let lastSnap = 0;
+  function loadPreds() { try { return JSON.parse(localStorage.getItem(PRED_KEY)) || {}; } catch (e) { return {}; } }
+  function predFrom(s, ev) {
+    const m = ev.summary;
+    return { from: Math.round(m.from), raw: Math.round(E.norm(m.from - E.fixDeg(s))), speed: Math.round(m.speed * 10) / 10,
+      swirl: Math.round(m.swirlFrac * 100) / 100, thermal: m.thermalPhase, score: ev.score };
+  }
+  function sitKey(id, date, kind) { return id + '|' + date + '|' + kind; }
+  // Save today's calls. A call stops updating half an hour into the sit, so it stays what the hunter went in with.
+  function snapPreds(force) {
+    if (!data.ref || (!force && Date.now() - lastSnap < 60000)) return;
+    lastSnap = Date.now();
+    const keep = loadPreds(), today = E.dateKey(data.nowMin);
+    stands().forEach((s) => {
+      const fc = data.fc[s.id]; if (!fc || s.example) return;
+      const now = E.nowMinFor(fc);
+      ['AM', 'PM'].forEach((kind) => {
+        const w = E.sitWindowFor(fc, today, kind);
+        if (w && now <= w.start + 30) keep[sitKey(s.id, today, kind)] = predFrom(s, E.evaluateSit(s, fc, w, now));
+      });
     });
-    if (!ui.logOpen) {
-      box.appendChild(h('button', { class: 'btn small', type: 'button', onclick: () => { ui.logOpen = true; renderSheet(); } }, icon('plus', 15), 'Log a sit'));
-    } else {
-      const d = h('input', { id: 'log-date', type: 'date', value: todayKey() });
-      const n = h('input', { id: 'log-deer', type: 'number', min: 0, max: 99, inputmode: 'numeric', placeholder: '0' });
-      const t = h('input', { id: 'log-note', type: 'text', maxlength: 80, placeholder: 'Optional note' });
-      box.appendChild(h('div', { class: 'logform' },
-        h('label', { class: 'field', for: 'log-date' }, h('span', null, 'Date'), d),
-        h('label', { class: 'field', for: 'log-deer' }, h('span', null, 'Deer seen'), n),
-        h('label', { class: 'field wide', for: 'log-note' }, h('span', null, 'Note'), t),
-        h('div', { class: 'row2' },
-          h('button', { class: 'btn primary', type: 'button', onclick: () => {
-            if (!d.value) return;
-            const sits = (s.sits || []).concat([{ date: d.value, deer: n.value === '' ? null : +n.value, note: t.value.trim() }]).sort((a, b) => (a.date < b.date ? -1 : 1));
-            ui.logOpen = false; S.updateStand(s.id, { sits }); toast('Sit logged'); recompute();
-          } }, 'Save sit'),
-          h('button', { class: 'btn', type: 'button', onclick: () => { ui.logOpen = false; renderSheet(); } }, 'Cancel'))));
+    Object.keys(keep).forEach((k) => { const p = k.split('|'); if (E.dayDiff(p[p.length - 2], today) > 10) delete keep[k]; });
+    try { localStorage.setItem(PRED_KEY, JSON.stringify(keep)); } catch (e) { /* storage full: the log still works without calls */ }
+  }
+  // StandCast's call for a stand's sit: the saved one, or worked out now if the forecast still covers that day.
+  function predFor(s, date, kind) {
+    const saved = loadPreds()[sitKey(s.id, date, kind)];
+    if (saved) return saved;
+    const fc = data.fc[s.id], w = fc && E.sitWindowFor(fc, date, kind);
+    if (!w || w.start < fc.t[0]) return null;
+    return predFrom(s, E.evaluateSit(s, fc, w, E.nowMinFor(fc)));
+  }
+  function saveSits(s, sits) {
+    const fix = E.windFixFrom(sits), was = s.windFix;
+    const windFix = fix ? Object.assign(fix, was && was.off ? { off: true } : null) : null;
+    S.updateStand(s.id, { sits, windFix });
+    if (fix && (!was || was.deg !== fix.deg) && !(was && was.off)) toast('StandCast learned this stand\'s wind from your checks');
+  }
+  const OUTCOMES = [['range', 'Deer in range'], ['seen', 'Saw deer'], ['busted', 'Winded me'], ['none', 'No deer']];
+  const OBS_WORD = { calm: 'calm', swirl: 'swirling' };
+  const obsText = (o) => OBS_WORD[o] || o;
+  // the record line for the ranking card, e.g. "Wind calls matched your checks 9 of 11"
+  function recordText(s) {
+    const r = E.sitRecord(s.sits);
+    return r.checks ? 'Wind calls matched your checks ' + r.hits + ' of ' + r.checks : '';
+  }
+  function fmtLogDate(d) {
+    const p = d.split('-');
+    return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+p[1] - 1] + ' ' + (+p[2]);
+  }
+  function sitRow(s, x) {
+    const c = E.checkSit(x), bits = [];
+    if (x.obs) bits.push('Wind ' + obsText(x.obs));
+    if (x.pred) bits.push('we said ' + (x.obs === 'calm' ? (x.pred.speed < 3 ? 'light' : Math.round(x.pred.speed) + ' mph') : x.obs === 'swirl' ? (x.pred.swirl >= 0.3 ? 'swirl' : 'no swirl') : E.compass(x.pred.from)));
+    const out = OUTCOMES.filter((o) => o[0] === x.outcome)[0];
+    if (out) bits.push(out[1]);
+    if (x.deer != null && x.deer !== '') bits.push(x.deer + ' deer');
+    if (x.note) bits.push(x.note);
+    return h('div', { class: 'logrow' },
+      c ? h('span', { class: 'chk ' + (c.hit ? 'hit' : 'miss'), title: c.hit ? 'Our call matched' : 'Our call missed' }, c.hit ? '✓' : '✗') : h('span', { class: 'chk none' }, '·'),
+      h('span', null, h('b', null, fmtLogDate(x.date) + (x.kind ? ' ' + x.kind : '')), bits.length ? '  ·  ' + bits.join('  ·  ') : ''),
+      h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Remove this sit', onclick: () => {
+        saveSits(s, (s.sits || []).filter((y) => y !== x)); recompute();
+      } }, icon('close', 16)));
+  }
+  function trackRecord(s) {
+    const r = E.sitRecord(s.sits), box = h('div', { class: 'record' });
+    if (!r.checks) {
+      box.appendChild(h('p', { class: 'line dim' }, 'After each sit, note which way the milkweed drifted. StandCast checks it against its call for this stand and keeps score here. After 3 checks that agree, it learns how the wind really runs at this stand.'));
+      return box;
     }
+    const pct = Math.round(100 * r.hits / r.checks);
+    box.appendChild(h('p', { class: 'record-main' }, h('b', null, r.hits + ' of ' + r.checks), ' wind calls matched your checks here (' + pct + '%).'));
+    const split = ['AM', 'PM'].filter((k) => r[k].checks).map((k) => (k === 'AM' ? 'Mornings ' : 'Evenings ') + r[k].hits + ' of ' + r[k].checks);
+    if (split.length === 2) box.appendChild(h('p', { class: 'line dim' }, split.join('  ·  ')));
+    if (r.busted) box.appendChild(h('p', { class: 'line dim' }, 'Winded ' + r.busted + (r.busted === 1 ? ' time' : ' times') + ' in ' + r.sits + ' logged sits.'));
+    const f = s.windFix;
+    if (f) {
+      const ex = 225, side = f.deg > 0 ? 'clockwise' : 'counterclockwise';
+      box.appendChild(h('div', { class: 'note' + (f.off ? '' : ' good') },
+        h('p', null, 'Your ' + f.n + ' checks show the air here runs about ' + Math.abs(f.deg) + '° ' + side + ' of the forecast (a forecast ' + E.compass(ex) + ' wind reads more like ' + E.compass(ex + f.deg) + ' at this stand). ' +
+          (f.off ? 'This correction is off.' : 'StandCast now turns this stand\'s wind to match.')),
+        h('button', { class: 'btn small', type: 'button', onclick: () => {
+          S.updateStand(s.id, { windFix: Object.assign({}, f, { off: !f.off }) }); recompute();
+        } }, f.off ? 'Use the correction' : 'Turn the correction off')));
+    } else if (r.checks >= E.FIX.min) {
+      box.appendChild(h('p', { class: 'line dim' }, 'No steady difference from the forecast at this stand, so StandCast uses it as is.'));
+    }
+    return box;
+  }
+  function choiceRow(opts, cur, onPick, cls) {
+    const row = h('div', { class: 'choice ' + (cls || '') });
+    opts.forEach((o) => row.appendChild(h('button', { class: 'chip-btn' + (o[0] === cur ? ' on' : ''), type: 'button', 'aria-pressed': o[0] === cur ? 'true' : 'false',
+      onclick: () => { onPick(o[0] === cur ? null : o[0]); } }, o[1])));
+    return row;
+  }
+  function sitLog(s) {
+    const all = s.sits || [], list = all.slice(-6).reverse();
+    const box = h('div', { class: 'block' }, h('h3', null, 'Sit log and wind checks'), trackRecord(s));
+    list.forEach((x) => box.appendChild(sitRow(s, x)));
+    if (all.length > list.length) box.appendChild(h('p', { class: 'fine tight' }, (all.length - list.length) + ' older sits are kept and counted.'));
+    if (!ui.logOpen) {
+      box.appendChild(h('button', { class: 'btn small', type: 'button', onclick: () => {
+        const hr = new Date().getHours();
+        ui.logOpen = { kind: hr < 12 ? 'AM' : 'PM', obs: null, outcome: null }; renderSheet();
+      } }, icon('plus', 15), 'Log a sit'));
+      return box;
+    }
+    const f = ui.logOpen;
+    const d = h('input', { id: 'log-date', type: 'date', value: f.date || todayKey(), onchange: () => { f.date = d.value; } });
+    const n = h('input', { id: 'log-deer', type: 'number', min: 0, max: 99, inputmode: 'numeric', placeholder: '0', value: f.deer || '', oninput: () => { f.deer = n.value; } });
+    const t = h('input', { id: 'log-note', type: 'text', maxlength: 80, placeholder: 'Optional note', value: f.note || '', oninput: () => { f.note = t.value; } });
+    const pick = (k) => (v) => { f[k] = v; renderSheet(); };
+    const compassPad = h('div', { class: 'wind-grid obs' }, ['NW', 'N', 'NE', 'W', 'calm', 'E', 'SW', 'S', 'SE'].map((k) =>
+      h('button', { class: 'wg ' + (f.obs === k ? 'good' : 'none'), type: 'button', 'aria-pressed': f.obs === k ? 'true' : 'false',
+        'aria-label': k === 'calm' ? 'Calm, no drift' : 'Wind from the ' + k, onclick: () => pick('obs')(f.obs === k ? null : k) },
+      h('span', null, k === 'calm' ? 'Calm' : k))));
+    box.appendChild(h('div', { class: 'logform' },
+      h('label', { class: 'field', for: 'log-date' }, h('span', null, 'Date'), d),
+      h('div', { class: 'field' }, h('span', null, 'Sit'), choiceRow([['AM', 'Morning'], ['PM', 'Evening']], f.kind, (v) => pick('kind')(v || f.kind))),
+      h('div', { class: 'field wide' }, h('span', null, 'Which way was the wind coming FROM at the stand? (milkweed, smoke, powder)'), compassPad,
+        choiceRow([['swirl', 'Swirling, kept changing']], f.obs, pick('obs'))),
+      h('div', { class: 'field wide' }, h('span', null, 'How did it go?'), choiceRow(OUTCOMES, f.outcome, pick('outcome'))),
+      h('label', { class: 'field', for: 'log-deer' }, h('span', null, 'Deer seen'), n),
+      h('label', { class: 'field wide', for: 'log-note' }, h('span', null, 'Note'), t),
+      h('div', { class: 'row2' },
+        h('button', { class: 'btn primary', type: 'button', onclick: () => {
+          if (!d.value) return;
+          const sit = { date: d.value, kind: f.kind, deer: n.value === '' ? null : +n.value, note: t.value.trim() };
+          if (f.obs) sit.obs = f.obs;
+          if (f.outcome) sit.outcome = f.outcome;
+          const p = predFor(s, sit.date, sit.kind);
+          if (p) sit.pred = p;
+          const order = (x) => x.date + (x.kind === 'PM' ? '2' : '1');
+          const sits = all.concat([sit]).sort((a, b) => (order(a) < order(b) ? -1 : 1));
+          ui.logOpen = false; saveSits(s, sits);
+          const c = E.checkSit(sit);
+          toast(c ? (c.hit ? 'Sit logged. Our wind call matched.' : 'Sit logged. Our wind call missed; noted for this stand.') :
+            f.obs && !p ? 'Sit logged. No saved call for that day, so the wind check is not scored.' : 'Sit logged');
+          recompute();
+        } }, 'Save sit'),
+        h('button', { class: 'btn', type: 'button', onclick: () => { ui.logOpen = false; renderSheet(); } }, 'Cancel'))));
     return box;
   }
   function standView() {
@@ -1186,6 +1306,10 @@
     root.appendChild(h('div', { class: 'block' }, h('h3', null, 'What to trust'),
       h('p', { class: 'line' }, 'Wind comes from the National Weather Service forecast, on a grid about a mile and a half wide. It does not see every hollow and ridge, so local swirl can differ. Thermals are an estimate from the slope, the sun and cloud cover, and they matter most in light wind on a real hillside.'),
       h('p', { class: 'line' }, 'Use it to choose between stands and to spot a bad wind swing coming. Your own read of the woods comes first.')));
+    root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Wind checks: keeping StandCast honest'),
+      h('p', { class: 'line' }, 'Before each sit, StandCast saves its wind call for every stand on this phone. After the sit, open the stand, tap Log a sit, and tap the way the wind was coming from (milkweed, smoke or powder at the stand). StandCast scores its own call against yours: a call within one compass point counts as a match.'),
+      h('p', { class: 'line' }, 'Each stand keeps a track record. Once 3 or more of your checks agree that the air at a stand runs off the forecast, for example a draw that bends a southwest wind to the west, StandCast turns that stand\'s modeled wind to match. You can switch the correction off on the stand.'),
+      h('p', { class: 'line' }, 'A sit logged days later, with no saved call for that day, is kept but not scored.')));
     root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Reading the thermals'),
       h('p', { class: 'line' }, 'Wind and thermals are drawn apart. The long pale streaks are the wind near the ground, slowed by the trees. The orange and purple glow marks slopes where thermals are working, and the bright beads crawling across it show which way: orange climbing uphill, purple draining downhill. Beads go faint where the wind is strong enough to overpower them. Pink spinning rings are swirl, where the two fight. The green puffs leaving each stand are your scent riding all of it together.'),
       h('p', { class: 'line' }, 'Under Map layers you can show just the wind, just the thermals, or both.'),

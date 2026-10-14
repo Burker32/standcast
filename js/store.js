@@ -151,7 +151,7 @@
   function dataSig() {
     var r = realItems();
     var text = JSON.stringify([
-      r.stands.map(function (s) { return [s.id, s.name, s.type, s.lat, s.lng, s.winds, s.notes, s.override, s.sits]; }),
+      r.stands.map(function (s) { return [s.id, s.name, s.type, s.lat, s.lng, s.winds, s.notes, s.override, s.sits, s.windFix]; }),
       r.marks.map(function (m) { return [m.id, m.type, m.lat, m.lng, m.name || '', m.note, m.photoId]; })
     ]);
     var hash = 5381;

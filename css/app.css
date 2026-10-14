@@ -347,6 +347,22 @@ textarea { resize: vertical; min-height: 96px; line-height: 1.4; }
 .logrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; padding-left: 2px; }
 .logform { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .logform .row2 { grid-column: 1 / -1; }
+.logform .field.wide { grid-column: 1 / -1; }
+.logrow > span:nth-child(2) { flex: 1; min-width: 0; }
+.chk { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 13px; }
+.chk.hit { background: color-mix(in srgb, var(--good) 25%, transparent); color: var(--good); }
+.chk.miss { background: color-mix(in srgb, var(--bad) 22%, transparent); color: var(--bad); }
+.chk.none { color: var(--muted, #888); }
+.choice { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.choice .chip-btn { min-height: 36px; padding: 0 12px; font-size: 13px; }
+.wind-grid.obs { width: min(100%, 230px); gap: 6px; }
+.wind-grid.obs .wg { aspect-ratio: 1.35; border-radius: 12px; }
+.wind-grid.obs .wg span { font-size: 17px; }
+.wind-grid.obs .wg.good { border-color: var(--wind); background: color-mix(in srgb, var(--wind) 25%, var(--surface-2)); }
+.record { margin-bottom: 6px; }
+.record-main { margin: 0 0 2px; font-size: 15px; }
+.note.good { border-color: var(--good); }
+.why.record-line::before { background: var(--good); }
 
 /* marks */
 .type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 8px; }
