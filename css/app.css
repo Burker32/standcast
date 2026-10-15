@@ -375,6 +375,7 @@ textarea { resize: vertical; min-height: 96px; line-height: 1.4; }
 .site-card { padding: 10px 12px; margin: 8px 0; border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2); display: flex; flex-direction: column; gap: 4px; }
 .site-card.on { border-color: #ffd23f; box-shadow: 0 0 0 2px #ffd23f inset; }
 .site-card .line { margin: 0; font-size: 14px; }
+.site-num { font: 800 17px/1 var(--display); margin-right: 2px; }
 .site-head { display: flex; align-items: center; gap: 8px; }
 .site-score { margin-left: auto; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--c, inherit); }
 .sec-head { margin: 14px 0 6px; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted, inherit); opacity: .85; }

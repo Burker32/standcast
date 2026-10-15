@@ -1142,20 +1142,75 @@
       var near = sign.filter(function (m) { return distanceM(c.lat, c.lng, m.lat, m.lng) <= SITES.signM; }).length;
       if (near) { score += Math.min(0.3, 0.1 * near); why.push(near + (near === 1 ? ' sign mark' : ' sign marks') + ' within ' + yd(SITES.signM) + '.'); }
       // good winds: ones that carry scent at least 90 degrees away from the bedding and the food
-      var keep = [b, f].filter(Boolean), goodWinds = null, windOk = null;
+      var keep = [b, f].filter(Boolean), goodWinds = null, badWinds = null, windOk = null;
       if (keep.length) {
         goodWinds = SECTORS.filter(function (d, k) { var to = norm(k * 45 + 180); return keep.every(function (x) { return angDiff(to, x.b) >= 90; }); });
+        // bad: winds that carry scent straight at the bedding or the food
+        badWinds = SECTORS.filter(function (d, k) { var to = norm(k * 45 + 180); return keep.some(function (x) { return angDiff(to, x.b) <= 45; }); });
         if (o.windFrom != null) {
           windOk = goodWinds.some(function (d) { return angDiff(SECTORS.indexOf(d) * 45, o.windFrom) <= 22.5; });
           score += windOk ? 0.15 : -0.1;
         }
       }
-      out.push({ lat: c.lat, lng: c.lng, kind: c.kind, score: clamp(score, 0, 1), why: why, goodWinds: goodWinds, windOk: windOk });
+      out.push({ lat: c.lat, lng: c.lng, kind: c.kind, score: clamp(score, 0, 1), why: why, goodWinds: goodWinds, badWinds: badWinds, windOk: windOk });
     });
     out.sort(function (a, b2) { return b2.score - a.score; });
     var kept = [];
-    out.forEach(function (s) { if (kept.length < SITES.max && !kept.some(function (k) { return distanceM(s.lat, s.lng, k.lat, k.lng) < SITES.spacingM; })) kept.push(s); });
+    out.forEach(function (s) { if (kept.length < (o.max || SITES.max) && !kept.some(function (k) { return distanceM(s.lat, s.lng, k.lat, k.lng) < SITES.spacingM; })) kept.push(s); });
     return kept;
+  }
+
+  /* ---------- the best spots for one hunt ----------
+   * Each site from standSites is treated as a stand on its own slope and run through evaluateSit for the hunt
+   * window: the wind through the sit (with the winds that protect the bedding and food as its good winds),
+   * thermals, swirl, steadiness, wind speed and rain. Temperature then favors shady north slopes and water on a
+   * warm evening, and sunny south slopes on a cold one. Score = half the spot itself, half the day. */
+  var DAY = { hot: 72, cold: 35, pick: 5, waterM: 150 };
+  // Slope and downhill direction at one cell of a ground grid (north row first), from heights about probeM away.
+  function demTerrainAt(z, rows, cols, cellM, row, col, probeM) {
+    var k = Math.max(1, Math.round((probeM || 25) / cellM)), r = Math.round(row), c = Math.round(col);
+    function at(rr, cc) {
+      if (rr < 0 || cc < 0 || rr >= rows || cc >= cols) return null;
+      var v = z[rr * cols + cc];
+      return v === v && v > -1000 ? v : null;
+    }
+    var n = at(r - k, c), e = at(r, c + k), s = at(r + k, c), w = at(r, c - k);
+    if (n == null || e == null || s == null || w == null) return { slopeDeg: 0, aspectDeg: null };
+    return terrainFromSamples(n, e, s, w, k * cellM);
+  }
+  // sites: standSites output, each with terrain {slopeDeg, aspectDeg}. win: the hunt window. o.marks for water.
+  // -> [{ site, ev (evaluateSit), temp, score (0-100), dayWhy: [text] }], best first.
+  function siteDay(sites, fc, win, nowMin, o) {
+    o = o || {};
+    var water = (o.marks || []).filter(function (m) { return m.type === 'water'; });
+    var out = sites.map(function (s) {
+      var winds = {};
+      (s.goodWinds || []).forEach(function (d) { winds[d] = 'good'; });
+      (s.badWinds || []).forEach(function (d) { winds[d] = 'bad'; });
+      var terr = s.terrain || { slopeDeg: 0, aspectDeg: null };
+      var ev = evaluateSit({ lat: s.lat, lng: s.lng, terrain: terr, winds: winds }, fc, win, nowMin);
+      var temp = mean(ev.samples.map(function (x) { return x.temp; }));
+      var asp = terr.aspectDeg, sloped = asp != null && terr.slopeDeg >= 4, adj = 0, why = [];
+      var wetM = water.reduce(function (m, w) { return Math.min(m, distanceM(s.lat, s.lng, w.lat, w.lng)); }, Infinity);
+      if (temp >= DAY.hot) {
+        if (sloped && angDiff(asp, 0) <= 60) { adj += 6; why.push('Shady north-facing slope: cooler on a warm hunt.'); }
+        else if (sloped && angDiff(asp, 180) <= 60) { adj -= 4; why.push('Sunny south-facing slope: deer tend to avoid these on a warm hunt.'); }
+        if (wetM <= DAY.waterM) { adj += 6; why.push('Water close by on a warm hunt.'); }
+      } else if (temp <= DAY.cold && sloped && angDiff(asp, 180) <= 60) {
+        adj += 6; why.push('Sunny south-facing slope: deer warm up on these on a cold hunt.');
+      }
+      return { site: s, ev: ev, temp: temp, score: Math.round(clamp(50 * s.score + 0.5 * ev.score + adj, 0, 100)), dayWhy: why };
+    });
+    out.sort(function (a, b) { return b.score - a.score; });
+    return out.slice(0, o.pick || DAY.pick);
+  }
+  // Plain words on how deer move in this temperature (°F), for the top of the list.
+  function tempWords(f) {
+    if (f >= 80) return 'Hot. Deer likely move late, right at dark; favor shade and water.';
+    if (f >= DAY.hot) return 'Warm. Expect movement late in the evening and early in the morning.';
+    if (f >= 50) return 'Mild. Fair daylight movement.';
+    if (f > DAY.cold) return 'Cool. Good weather for daylight movement.';
+    return 'Cold. Deer feed more and seek sunny slopes out of the wind.';
   }
 
   /* ---------- map geometry ---------- */
@@ -1188,7 +1243,7 @@
     SECTORS: SECTORS, DEG: DEG,
     clamp: clamp, norm: norm, angDiff: angDiff, mean: mean, compass: compass,
     checkSit: checkSit, sitRecord: sitRecord, windFixFrom: windFixFrom, fixDeg: fixDeg, FIX: FIX,
-    ROUTE: ROUTE, bearingTo: bearingTo, scentReach: scentReach, inScent: inScent, resampleLine: resampleLine, routeScent: routeScent, standSites: standSites, SITES: SITES,
+    ROUTE: ROUTE, bearingTo: bearingTo, scentReach: scentReach, inScent: inScent, resampleLine: resampleLine, routeScent: routeScent, standSites: standSites, SITES: SITES, siteDay: siteDay, demTerrainAt: demTerrainAt, tempWords: tempWords, DAY: DAY,
     toVec: toVec, fromVec: fromVec, distanceM: distanceM, yards: yards, fmtYards: fmtYards,
     parseLocalMin: parseLocalMin, dateKey: dateKey, fmtClock: fmtClock, fmtDayClock: fmtDayClock, fmtHour: fmtHour, dayDiff: dayDiff,
     solarPosition: solarPosition,

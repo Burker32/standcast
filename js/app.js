@@ -569,7 +569,7 @@
         h('span', { class: 'card-main' }, h('span', { class: 'card-title' }, h('b', null, s.name)),
           h('span', { class: 'why info' }, data.loading ? 'Loading forecast…' : 'No forecast for this stand yet.'))));
     });
-    root.appendChild(h('button', { class: 'btn wide-btn', type: 'button', onclick: findSites }, icon('search', 16), 'Find new stand sites in view'));
+    root.appendChild(h('button', { class: 'btn wide-btn', type: 'button', onclick: findSites }, icon('search', 16), 'Best 5 stand spots for this hunt (map in view)'));
     root.appendChild(h('p', { class: 'fine' }, 'Wind is modeled from a weather forecast. Thermals are estimated from the slope, sun and clouds. Scores are a guide, so trust your own read of the woods.'));
     return root;
   }
@@ -1077,6 +1077,7 @@
     // held = you pressed and held a spot, so whatever you pick goes straight there
     const pick = (k) => { if (held) placePending(k); else startPlacing(k); };
     root.appendChild(backHeader(held ? 'Add at this spot' : 'Add to the map', () => go('list')));
+    if (!held) root.appendChild(h('button', { class: 'btn primary wide-btn', type: 'button', onclick: findSites }, icon('search', 16), 'Find the 5 best stand spots in view'));
     if (held) root.appendChild(h('div', { class: 'note draft-bar' },
       h('p', null, 'Pick what goes at the spot you held. Tap the map to cancel.'),
       h('button', { class: 'btn small', type: 'button', onclick: () => go('list') }, 'Cancel')));
@@ -1086,7 +1087,7 @@
         h('span', { class: 'type-dot', style: 'background:' + MT.TYPES[k].color }, MT.icon(k, 18)), MT.TYPES[k].label))));
     if (held) return root;
     root.appendChild(h('button', { class: 'btn wide-btn', type: 'button', onclick: () => go('photo') }, icon('photo', 16), 'Add a photo'));
-    root.appendChild(h('button', { class: 'btn wide-btn', type: 'button', onclick: findSites }, icon('search', 16), 'Find stand sites in view'));
+
     root.appendChild(h('p', { class: 'fine' }, 'Take a photo at the sign and the pin drops where you are standing. You can also press and hold any spot on the map to add something there.'));
     return root;
   }
@@ -1504,9 +1505,11 @@
     document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   }
-  /* ---- stand-site suggestions for the area in view ----
-   * Reads the ground once (zoom-15 lidar squares), finds saddles, funnels and benches, and scores them with the
-   * hunter's marked bedding, food and sign and the wind for the hunt picked on the Stands tab (engine.standSites). */
+  /* ---- best stand spots for a hunt, in the area in view ----
+   * Reads the ground once (zoom-15 lidar squares) for saddles, funnels and benches, adds crossings the hunter
+   * marked, and scores them on the hunter's bedding, food and sign (engine.standSites). Each spot then gets its own
+   * slope from the same ground and is run through the forecast for the hunt picked here: wind, thermals, swirl,
+   * steadiness, rain and temperature (engine.siteDay). The top five show, numbered on the map. */
   function findSites() {
     const t = M.zoom >= 15 ? E.demTiles(M.bounds(), 0, 16, 15) : null;
     if (!t) { toast('Zoom in to about a square mile around where you hunt, then try again.'); return; }
@@ -1514,22 +1517,42 @@
     ui.sites = { busy: true, list: [] }; ui.siteOpen = null;
     if (isMobile() && ui.sheet === 'peek') setSheet('half');
     go('spots');
-    const view = M.bounds();
-    W.demMosaic(t).then((dem) => {
+    const view = M.bounds(), c = M.center();
+    const weather = W.loadFor([{ id: 'view', lat: c.lat, lng: c.lng }]).then((r) => r.byStand.view).catch(() => null);
+    Promise.all([W.demMosaic(t), weather]).then((res) => {
+      const dem = res[0], fc = res[1] || nearestFc(c.lat, c.lng);
       if (dem.missing === dem.total) throw new Error('none');
       const b = t.bounds;
       const place = (kind) => (s) => Object.assign({}, s, { kind: kind, lat: b.n - (s.row + 0.5) / dem.rows * (b.n - b.s), lng: b.w + (s.col + 0.5) / dem.cols * (b.e - b.w) });
       const sp = E.findSpots(dem.z, dem.rows, dem.cols, t.cellM), be = E.findBenches(dem.z, dem.rows, dem.cols, t.cellM);
-      const inView = (c) => c.lat >= view.s && c.lat <= view.n && c.lng >= view.w && c.lng <= view.e;
+      const inView = (x) => x.lat >= view.s && x.lat <= view.n && x.lng >= view.w && x.lng <= view.e;
       const cands = sp.saddles.map(place('saddle')).concat(sp.funnels.map(place('funnel')),
         be.benches.slice().sort((x, y) => y.areaM2 - x.areaM2).slice(0, 30).map(place('bench'))).filter(inView);
-      const c = M.center(), fc = nearestFc(c.lat, c.lng), sit = currentSit();
-      const windFrom = fc && sit ? E.sampleForecast(fc, sitMid(sit)).from : null;
       const marks = S.state.marks.filter(inView);
-      ui.sites = { list: E.standSites(cands, S.state.marks, { stands: stands(), windFrom: windFrom }), windFrom: windFrom, sit: sit ? sit.label : null,
+      const base = E.standSites(cands, S.state.marks, { stands: stands(), max: 15 }).filter(inView);
+      // each spot's own slope and facing, from the same ground heights
+      base.forEach((s) => { s.terrain = E.demTerrainAt(dem.z, dem.rows, dem.cols, t.cellM, (b.n - s.lat) / (b.n - b.s) * dem.rows - 0.5, (s.lng - b.w) / (b.e - b.w) * dem.cols - 0.5, 25); });
+      const sits = fc ? E.listSits(fc, E.nowMinFor(fc), 6) : [];
+      ui.sites = { base: base, fc: fc, sits: sits, sitId: sits.some((x) => x.id === ui.sitId) ? ui.sitId : (sits[0] && sits[0].id),
         hasBed: marks.some((m) => m.type === 'bed'), hasFood: marks.some((m) => ['food', 'plot', 'water', 'feeder'].indexOf(m.type) >= 0) };
-      if (ui.view === 'spots') { M.renderSites(ui.sites.list, (i) => focusSite(i)); renderSheet(); }
+      scoreSites();
     }).catch(() => { ui.sites = { error: 'Could not load the ground data. Check your signal and try again.' }; renderSheet(); });
+  }
+  // Rank the spots for the hunt picked in the list (no forecast: ground and marks only).
+  function scoreSites() {
+    const st = ui.sites; if (!st || !st.base) return;
+    const sit = st.sits.filter((x) => x.id === st.sitId)[0], fc = st.fc;
+    const win = fc && sit ? E.windowForStand(fc, sit, E.nowMinFor(fc)) : null;
+    st.win = win; st.sit = sit || null;
+    st.list = win ? E.siteDay(st.base, fc, win, E.nowMinFor(fc), { marks: S.state.marks }).map((r) => Object.assign({}, r.site, { day: r }))
+      : st.base.slice(0, E.DAY.pick);
+    if (win) {
+      const mid = (win.start + win.end) / 2, w = E.sampleForecast(fc, mid);
+      const temps = []; for (let x = win.start; x <= win.end; x += 30) temps.push(E.sampleForecast(fc, x).temp);
+      st.weather = { from: w.from, speed: w.speed, temp: E.mean(temps), precip: w.precip };
+    } else st.weather = null;
+    ui.siteOpen = null;
+    if (ui.view === 'spots') { M.renderSites(st.list, (i) => focusSite(i)); renderSheet(); }
   }
   function focusSite(i) {
     const s = ui.sites && ui.sites.list[i]; if (!s) return;
@@ -1541,21 +1564,36 @@
   const SITE_NAME = { saddle: 'Saddle', funnel: 'Funnel', bench: 'Bench', crossing: 'Crossing' };
   function siteView() {
     const st = ui.sites || {}, root = h('div', { class: 'view' });
-    root.appendChild(backHeader('Stand sites', () => { ui.sites = null; M.renderSites(null); go('list'); }));
-    if (st.busy) { root.appendChild(h('p', { class: 'note' }, 'Reading the ground for saddles, funnels and benches…')); return root; }
+    root.appendChild(backHeader('Best stand spots', () => { ui.sites = null; M.renderSites(null); go('list'); }));
+    if (st.busy) { root.appendChild(h('p', { class: 'note' }, 'Reading the ground and the forecast for the area in view…')); return root; }
     if (st.error) { root.appendChild(h('p', { class: 'note warn' }, st.error)); return root; }
-    root.appendChild(h('p', { class: 'sub' }, 'Best spots in view' + (st.sit && st.windFrom != null ? ', for ' + st.sit.toLowerCase() + ' (' + E.compass(st.windFrom) + ' wind)' : '')));
+    if (st.sits && st.sits.length) root.appendChild(h('div', { class: 'chips', role: 'tablist', 'aria-label': 'Hunt' },
+      st.sits.map((x) => h('button', { class: 'chip-btn' + (x.id === st.sitId ? ' on' : ''), type: 'button', role: 'tab', 'aria-selected': x.id === st.sitId ? 'true' : 'false',
+        onclick: () => { st.sitId = x.id; scoreSites(); } }, x.label))));
+    if (st.weather && st.win) {
+      const wx = st.weather;
+      root.appendChild(h('div', { class: 'note' },
+        h('p', null, h('b', null, E.fmtDayClock(st.win.start) + ' to ' + E.fmtClock(st.win.end)), '  ·  ' + E.compass(wx.from) + ' wind ' + Math.round(wx.speed) + ' mph  ·  ' + Math.round(wx.temp) + '°F' + (wx.precip >= 40 ? '  ·  ' + Math.round(wx.precip) + '% rain' : '')),
+        h('p', { class: 'line dim' }, E.tempWords(wx.temp))));
+    } else root.appendChild(h('p', { class: 'note warn' }, 'No forecast for this area right now, so these are ranked on the ground and your marks only.'));
     if (!st.hasBed || !st.hasFood) root.appendChild(h('p', { class: 'note' }, 'Tip: mark ' + (!st.hasBed && !st.hasFood ? 'bedding and food' : !st.hasBed ? 'bedding' : 'food') +
-      ' in this area and the picks get much better: StandCast looks for spots between them and tells you which winds keep your scent off both.'));
+      ' in this area and the picks get much better: StandCast looks for spots between them and checks which winds keep your scent off both.'));
     if (!st.list.length) { root.appendChild(h('p', { class: 'line dim' }, 'No saddles, funnels or benches found in view. Try a hillier area, or zoom out a little.')); return root; }
+    const orList = (a) => a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' or ' + a[a.length - 1];
     st.list.forEach((s, i) => {
-      const orList = (a) => a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' or ' + a[a.length - 1];
-      const winds = s.goodWinds ? (s.goodWinds.length ? 'Hunt it on ' + (s.goodWinds[0] === 'E' ? 'an ' : 'a ') + orList(s.goodWinds) + ' wind.' : 'No wind keeps scent off both bedding and food here; hunt it on a wind that protects the bedding.') : 'Mark bedding or food nearby for wind advice.';
+      const d = s.day, score = d ? d.score : Math.round(s.score * 100);
+      const label = score >= 70 ? ['Strong', 'good'] : score >= 55 ? ['Good', 'good'] : score >= 40 ? ['Fair', 'ok'] : ['Long shot', 'none'];
+      const winds = s.goodWinds ? (s.goodWinds.length ? 'Best on ' + (s.goodWinds[0] === 'E' ? 'an ' : 'a ') + orList(s.goodWinds) + ' wind.' : 'No wind keeps scent off both bedding and food here.') : 'Mark bedding or food nearby for wind advice.';
+      // the forecast reasons for this spot, without the ones meant for a real stand
+      const dayReasons = d ? d.ev.reasons.filter((r) => !/Mark this stand|Hunted /.test(r.text)).slice(0, 3) : [];
       root.appendChild(h('div', { class: 'site-card' + (ui.siteOpen === i ? ' on' : ''), 'data-site': i },
         h('div', { class: 'site-head' }, h('span', { class: 'site-pin' }, String(i + 1)),
-          h('b', null, SITE_NAME[s.kind] || 'Spot'), h('span', { class: 'site-score ' + (s.score >= 0.6 ? 'good' : s.score >= 0.4 ? 'ok' : 'none') }, s.score >= 0.6 ? 'Strong' : s.score >= 0.4 ? 'Worth a look' : 'Long shot')),
+          h('b', null, SITE_NAME[s.kind] || 'Spot'),
+          h('span', { class: 'site-score ' + label[1] }, h('b', { class: 'site-num' }, String(score)), ' ' + label[0])),
         s.why.map((w) => h('p', { class: 'line' }, w)),
-        h('p', { class: 'why ' + (s.windOk === false ? 'bad' : s.windOk ? 'good' : 'info') }, winds + (s.windOk === true ? ' The ' + E.compass(st.windFrom) + ' wind fits.' : s.windOk === false ? ' The ' + E.compass(st.windFrom) + ' wind does not.' : '')),
+        dayReasons.map((r) => h('p', { class: 'why ' + r.kind }, r.text.replace(' for this stand', ' for this spot'))),
+        d ? d.dayWhy.map((w) => h('p', { class: 'why info' }, w)) : null,
+        h('p', { class: 'line dim' }, winds),
         h('div', { class: 'row2' },
           h('button', { class: 'btn small', type: 'button', onclick: () => focusSite(i) }, icon('locate', 15), 'Show'),
           h('button', { class: 'btn small primary', type: 'button', onclick: () => {
@@ -1563,7 +1601,7 @@
             ui.pending = { lat: s.lat, lng: s.lng, at: 0 }; placePending('stand');
           } }, icon('plus', 15), 'Put a stand here'))));
     });
-    root.appendChild(h('p', { class: 'fine' }, 'Picked from the shape of the ground and your own marks. It cannot see cover, fences, property lines or where deer really walk, so scout it before you hang a stand.'));
+    root.appendChild(h('p', { class: 'fine' }, 'Picked from the shape of the ground, your own marks and the forecast. Wind, thermals and swirl are estimates, and it cannot see cover, fences, property lines or where deer really walk, so scout a spot before you hang a stand.'));
     return root;
   }
   /* ---- pins to and from other map apps (GPX, KML, KMZ) ---- */
@@ -1687,7 +1725,7 @@
       h('p', { class: 'line' }, 'Open a stand and tap Draw my walk in. Tap where you park, then each turn on the way; the stand is added at the end. "Start at me" begins the line where you are standing. StandCast walks the route at about 2 mph so you reach the stand as the hunt window opens, and works out the wind and slope thermals at each step.'),
       h('p', { class: 'line' }, 'On the map, white ticks show where your scent drifts as you walk; red ticks mean it reaches bedding, a trail, a scrape, a rub, food, water or a sighting you marked. The way out is checked as you leave at the end of the window, on the same path unless you draw a different one.')));
     root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Finding stand sites'),
-      h('p', { class: 'line' }, 'Zoom in to about a square mile and tap Find new stand sites in view (on the Stands tab or the + menu). StandCast reads the lidar ground for saddles, funnels and benches, then ranks them using your marks: spots between bedding and food, close to scrapes, rubs and trails, and crossings you marked. Each pick lists the winds that keep your scent off the bedding and the food.'),
+      h('p', { class: 'line' }, 'Zoom in to about a square mile and tap Find the 5 best stand spots (top of the + menu, or the Stands tab). StandCast reads the lidar ground for saddles, funnels and benches and adds crossings you marked. It scores each spot on your marks (between bedding and food, close to scrapes, rubs and trails), then on the forecast for the hunt you pick: the wind and thermals on that spot\'s own slope, swirl, how steady the wind is, rain and temperature. On a warm hunt shady north slopes and water score higher; on a cold one, sunny south slopes. Each pick lists the winds that keep your scent off the bedding and the food.'),
       h('p', { class: 'line' }, 'It only sees the shape of the ground and your own marks, so scout a spot before you hang a stand. Mark bedding and food first for the best picks.')));
     root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Bow range and trail cameras'),
       h('p', { class: 'line' }, 'Rings at 20, 30 and 40 yd show round every stand when you zoom in. Turn them off in the layers menu.'),

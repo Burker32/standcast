@@ -24,7 +24,7 @@ function makeForecast(opts) {
     const tMin = L(iso);
     const sun = E.solarPosition(tMin * 60000 - OFFSET * 1000, LAT, LNG);
     const clearSw = sun.elev > 0 ? 950 * Math.sin(sun.elev * E.DEG) : 0;
-    t_.push(55); c_.push(cloud); p_.push(precip); g_.push(speed * 1.4);
+    t_.push(opts.temp == null ? 55 : opts.temp); c_.push(cloud); p_.push(precip); g_.push(speed * 1.4);
     s_.push(typeof speed === 'function' ? speed(h) : speed);
     d_.push(typeof dir === 'function' ? dir(h) : dir);
     sw_.push(clearSw * (1 - cloud / 100 * 0.75));
@@ -612,4 +612,37 @@ test('stand sites: between bedding and food beats a lone feature, and the good w
   const south = E.standSites(cands, marks, { windFrom: 180 })[0];
   assert.equal(south.windOk, false);
   assert.ok(south.score < r[0].score);
+});
+test('best spots today: the wind for the hunt, then temperature and slope, decide the top 5', () => {
+  const at = (b, m) => { const p = E.offsetLatLng(LAT, LNG, b, m); return { lat: p[0], lng: p[1] }; };
+  const fc = makeForecast({ speed: 8, dir: 90 });              // east wind all day
+  const now = L('2026-10-09T13:00'), sit = E.listSits(fc, now, 1)[0], win = E.windowForStand(fc, sit, now);
+  const flat = { slopeDeg: 0, aspectDeg: null };
+  const fits = Object.assign({ kind: 'saddle', score: 0.6, why: [], goodWinds: ['E', 'NE'], badWinds: ['W'], terrain: flat }, at(0, 0));
+  const clash = Object.assign({ kind: 'saddle', score: 0.6, why: [], goodWinds: ['W'], badWinds: ['E', 'NE', 'SE'], terrain: flat }, at(0, 500));
+  const r = E.siteDay([clash, fits], fc, win, now);
+  assert.equal(r[0].site, fits);
+  assert.ok(r[0].score - r[1].score >= 15, r[0].score + ' vs ' + r[1].score);
+  near(r[0].temp, 55, 0.01);
+  // a hot evening: the shady north slope with water near beats the sunny south slope
+  const hot = makeForecast({ speed: 8, dir: 90, temp: 84 });
+  const north = Object.assign({}, fits, { terrain: { slopeDeg: 12, aspectDeg: 0 } }, at(90, 300));
+  const south = Object.assign({}, fits, { terrain: { slopeDeg: 12, aspectDeg: 180 } }, at(270, 300));
+  const wet = [Object.assign({ type: 'water' }, at(90, 380))];
+  const h = E.siteDay([south, north], hot, win, now, { marks: wet });
+  assert.equal(h[0].site, north);
+  assert.ok(h[0].dayWhy.some((w) => /north-facing/.test(w)) && h[0].dayWhy.some((w) => /Water/.test(w)));
+  assert.ok(h[1].dayWhy.some((w) => /south-facing/.test(w)));
+  assert.match(E.tempWords(84), /Hot/); assert.match(E.tempWords(30), /Cold/);
+  // only the best five come back
+  const many = Array.from({ length: 8 }, (_, i) => Object.assign({}, fits, at(45 * i, 400)));
+  assert.equal(E.siteDay(many, fc, win, now).length, 5);
+});
+
+test('slope and facing from a ground grid', () => {
+  const rows = 21, cols = 21, cellM = 5, z = new Float32Array(rows * cols);
+  for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) z[i * cols + j] = 100 - i * 0.5;   // falls toward the south (rows run north to south)
+  const t = E.demTerrainAt(z, rows, cols, cellM, 10, 10, 25);
+  near(t.aspectDeg, 180, 0.5); near(t.slopeDeg, Math.atan(0.1) / E.DEG, 0.1);
+  assert.deepEqual(E.demTerrainAt(z, rows, cols, cellM, 1, 10, 25), { slopeDeg: 0, aspectDeg: null });   // too near the edge
 });
