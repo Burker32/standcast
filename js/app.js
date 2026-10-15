@@ -1810,6 +1810,13 @@
     document.addEventListener('visibilitychange', () => { if (!document.hidden && stands().length && data.at && Date.now() - data.at > W.TTL) refresh(); });
     window.addEventListener('online', () => { if (stands().length) refresh(true); });
   }
+  // A tap on the map with a stand or mark open closes it and goes back to the list. True if it did.
+  function closeOpen() {
+    if (ui.view !== 'stand' && ui.view !== 'mark') return false;
+    $('landcard').hidden = true;
+    go('list');
+    return true;
+  }
   // A tap on a road or trail line (when that layer is on and zoomed in) names it. True if there was one there.
   function roadAt(ll) {
     const info = SC.roads && ll ? SC.roads.pick(ll) : null;
@@ -2051,7 +2058,7 @@
     let saveTimer = null;
     M.init('map', {
       view: settings().view, basemap: settings().basemap,
-      onTap: (ll) => { if (ui.measure) addMeasurePoint(ll.lat, ll.lng); else if (ui.placing) placeAt(ll.lat, ll.lng); else if (!tapCancels() && !roadAt(ll)) parcelAt(ll); },
+      onTap: (ll) => { if (ui.measure) addMeasurePoint(ll.lat, ll.lng); else if (ui.placing) placeAt(ll.lat, ll.lng); else if (!tapCancels() && !closeOpen() && !roadAt(ll)) parcelAt(ll); },
       onHold: (ll) => holdAt(ll.lat, ll.lng),
       onSelectStand: (id) => { if (ui.measure) { const s = S.getStand(id); if (s) addMeasurePoint(s.lat, s.lng); } else if (!ui.placing) selectStand(id); },
       onSelectMark: (id) => { if (ui.measure) { const m = S.getMark(id); if (m) addMeasurePoint(m.lat, m.lng); } else if (!ui.placing) selectMark(id); },
@@ -2063,7 +2070,7 @@
     });
     try { if (SC.publand && M.leaflet) {
       SC.publand.attach(M.leaflet, {
-        onTap: (info, ll) => { if (ui.measure && ll) addMeasurePoint(ll.lat, ll.lng); else if (ui.placing && ll) placeAt(ll.lat, ll.lng); else if (!tapCancels() && !roadAt(ll)) showLand(info); },
+        onTap: (info, ll) => { if (ui.measure && ll) addMeasurePoint(ll.lat, ll.lng); else if (ui.placing && ll) placeAt(ll.lat, ll.lng); else if (!tapCancels() && !closeOpen() && !roadAt(ll)) showLand(info); },
         onStatus: (st) => { if (st === 'error') toast('Could not load public land. Check your signal.'); }
       });
       SC.publand.setEnabled(settings().layers.publand !== false);

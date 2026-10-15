@@ -11,7 +11,7 @@ A bowhunting app that answers "which stand tonight?" It models wind, thermals, s
   2. Bump `VERSION` in `sw.js`.
   3. Run `npm test`, and `node --check` on each edited JS file.
   4. Commit and push to `main`. GitHub Pages rebuilds the site by itself, usually within a minute or two.
-- **Every deploy must bump `VERSION` in `sw.js`** (currently `'v44'`). The service worker serves cache-first, so phones keep the old app until the version changes. After a deploy, the owner closes and reopens the app once.
+- **Every deploy must bump `VERSION` in `sw.js`** (currently `'v45'`). The service worker serves cache-first, so phones keep the old app until the version changes. After a deploy, the owner closes and reopens the app once.
 - The app is served from the `/standcast/` subfolder, so every path in `index.html`, `manifest.webmanifest` and `sw.js` must stay relative (no leading `/`).
 - The repo is public. `CLAUDE.local.md` and zip files are kept out by `.gitignore`. Check `git status` before committing so nothing private goes up.
 - The empty `.nojekyll` file tells GitHub Pages to serve the files as they are.
@@ -68,7 +68,7 @@ Scripts load in this order in `index.html`: engine, exif, marktypes, store, pins
 - **`js/store.js`:** localStorage for stands, marks, hunts and layer toggles. Data stays on the device: sharing the link does not share data. There's backup/restore for manual sharing.
 - **`js/exif.js`:** reads GPS from photo EXIF for placing marks.
 - **`js/app.js`:** the UI.
-  - Bottom sheet with drag and flick.
+  - Bottom sheet with drag and flick. A plain tap on the map with a stand or mark open closes it (`closeOpen()`, after `tapCancels()` in the tap handlers).
   - Stand ranking.
   - Routes: `stand.routes = { in, out }` (arrays of [lat, lng] from the truck to the stand; `out` null means the same way out). They are drawn with the measure tool (`ui.measure.route`, Save route), the slope along each is cached in `routeTerrain`, and `routeCheck()` uses the hunt window picked on the Stands tab. `map.js` `routeLayers()` draws the line with scent ticks every ~60 m (red where they reach sign). Bow range rings (`layers.rings`) are drawn in the same layer group and hidden by `.zoom-low`.
   - Stand sites: `findSites()` loads zoom-15 lidar for the view (zoom 15 and up), runs `findSpots` and `findBenches`, then `standSites`; `siteView()` lists them, `M.renderSites()` numbers them on the map, and "Put a stand here" reuses `placePending('stand')`.
