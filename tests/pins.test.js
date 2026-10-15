@@ -56,3 +56,25 @@ test('pins: StandCast GPX goes out and comes back the same', () => {
   assert.deepEqual(back.points.map((p) => [p.name, p.kind, p.note]), [['Oak <Flat>', 'stand', 'NW & W'], ['Rub', 'rub', 'big'], ['Stand of oaks', 'other', '']]);
   assert.throws(() => P.parse('hello'), /not GPX or KML/);
 });
+
+test('pins: onX icons decide the kind, export-time stamps are dropped, dated names give the real date', () => {
+  const pin = (lat, name, icon, desc) => `<wpt lat="${lat}" lon="-93.62"><time>2026-10-15T13:27:10Z</time><name>${name}</name>${desc ? '<desc>' + desc + '</desc>' : ''}<extensions><onx:icon>${icon}</onx:icon><onx:color>rgba(1,2,3,1)</onx:color></extensions></wpt>`;
+  const gpx = `<?xml version="1.0"?><gpx xmlns="http://www.topografix.com/GPX/1/1" xmlns:onx="http://www.onxmaps.com" version="1.1" creator="onXmaps hunt ios">` +
+    pin(37.81, 'My Location 10/30/25 09:31', 'Rub', '<![CDATA[Multiple within 5’ radius]]>') +
+    pin(37.82, 'hill top', 'Rub') +
+    pin(37.83, 'Waypoint 10/22/25 05:35', 'Tree Stand') +
+    pin(37.84, '3 way funnel', 'Pinch Point') +
+    pin(37.85, 'seat', 'Location') +
+    pin(37.86, 'grass patch', 'Location') +
+    pin(37.87, 'Waypoint 10/20/25 15:18', '4x4') +
+    pin(37.88, '5 does 1:50 pm', 'Doe') +
+    `<trk><name>Track 10/22/25 07:12</name><trkseg><trkpt lat="37.8" lon="-93.6"/></trkseg></trk></gpx>`;
+  const r = P.parse(gpx);
+  assert.deepEqual(r.points.map((p) => [p.kind, p.name, p.time]), [
+    ['rub', '', '2025-10-30T09:31:00'], ['rub', 'hill top', null], ['stand', '', '2025-10-22T05:35:00'], ['crossing', '3 way funnel', null],
+    ['stand', 'seat', null], ['other', 'grass patch', null], ['parking', '', '2025-10-20T15:18:00'], ['sighting', '5 does 1:50 pm', null]]);
+  assert.equal(r.points[0].note, 'Multiple within 5’ radius');
+  assert.equal(r.lines, 1);
+  // a single pin keeps its own time
+  assert.equal(P.parse(`<gpx><wpt lat="37.8" lon="-93.6"><time>2026-01-02T03:04:05Z</time><name>x</name></wpt></gpx>`).points[0].time, '2026-01-02T03:04:05Z');
+});

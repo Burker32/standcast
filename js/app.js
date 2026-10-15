@@ -1582,6 +1582,11 @@
       if (fresh.length) M.fitPoints(fresh.map((p) => ({ lat: p.lat, lng: p.lng })));
     }).catch((e) => toast(e && e.message ? e.message : 'Could not read that file.'));
   }
+  // a pin with no name of its own is shown by its date, e.g. "Oct 22, 2025"
+  function pinDate(p) {
+    const t = p.time && Date.parse(p.time);
+    return t ? new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  }
   function kindLabel(k) { return k === 'stand' ? 'Stand' : (MT.TYPES[k] || MT.TYPES.other).label; }
   function importView() {
     const im = ui.importing;
@@ -1599,11 +1604,11 @@
       Object.keys(counts).sort((a, b) => counts[b] - counts[a]).map((k) => counts[k] + ' ' + kindLabel(k).toLowerCase()).join(', ') + '.'));
     if (im.skipped) root.appendChild(h('p', { class: 'line dim' }, im.skipped + ' already on your map, so left out.'));
     if (im.lines) root.appendChild(h('p', { class: 'line dim' }, im.lines + (im.lines === 1 ? ' line (a track or boundary) is' : ' lines (tracks or boundaries) are') + ' not brought in.'));
-    root.appendChild(h('p', { class: 'fine tight' }, 'The kind is guessed from each pin\'s name and note. Change any of them below, or later on the pin.'));
+    root.appendChild(h('p', { class: 'fine tight' }, 'The kind comes from each pin\'s onX icon, or is guessed from its name and note. Change any of them below, or later on the pin.'));
     const opts = [['stand', 'Stand']].concat(MT.ORDER.map((k) => [k, MT.TYPES[k].label]));
     const list = h('div', { class: 'imp-list' });
     im.points.slice(0, 60).forEach((p) => list.appendChild(h('div', { class: 'imp-row' },
-      h('span', { class: 'imp-name' }, p.name || '(no name)'),
+      h('span', { class: 'imp-name' }, p.name || pinDate(p) || '(no name)'),
       h('select', { 'aria-label': 'Kind for ' + (p.name || 'pin'), onchange: (e) => { p.kind = e.target.value; } },
         opts.map((o) => h('option', { value: o[0], selected: o[0] === p.kind }, o[1]))))));
     if (n > 60) list.appendChild(h('p', { class: 'fine tight' }, 'And ' + (n - 60) + ' more, added with their guessed kinds.'));
@@ -1618,13 +1623,17 @@
     let ns = 0, nm = 0;
     im.points.forEach((p) => {
       const at = p.time && !isNaN(Date.parse(p.time)) ? Date.parse(p.time) : Date.now();
-      if (p.kind === 'stand') { S.addStand({ name: p.name || 'Imported stand', lat: p.lat, lng: p.lng, notes: p.note || '', createdAt: at }); ns++; }
+      if (p.kind === 'stand') { S.addStand({ name: p.name || ('Stand ' + (pinDate(p) || (ns + 1))), lat: p.lat, lng: p.lng, notes: p.note || '', createdAt: at }); ns++; }
       else { S.addMark({ type: MT.TYPES[p.kind] ? p.kind : 'other', name: p.name || '', note: p.note || '', lat: p.lat, lng: p.lng, createdAt: at }); nm++; }
     });
     ui.importing = null;
+    const added = im.points.map((p) => ({ lat: p.lat, lng: p.lng }));
     toast('Added ' + [ns ? ns + (ns === 1 ? ' stand' : ' stands') : null, nm ? nm + (nm === 1 ? ' mark' : ' marks') : null].filter(Boolean).join(' and ') + (ns ? '. Mark each stand\'s good and bad winds.' : '.'));
     go('list', { tab: ns && !nm ? 'stands' : 'marks' });
     if (ns) refresh();
+    // show where they all landed, above the panel
+    if (isMobile()) setSheet('peek');
+    setTimeout(() => M.fitPoints(added), 350);
   }
   function exportPins() {
     if (!stands().length && !S.state.marks.length) { toast('Nothing to export yet.'); return; }

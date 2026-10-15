@@ -38,7 +38,8 @@
 
   // What a pin is, from its name, symbol and note. Words hunters use in onX, HuntStand and Garmin.
   var WORDS = [
-    ['stand', /\b(tree ?stand|ladder|hang ?on|lock ?on|climber|stand|saddle set|box blind|elevated blind)\b/],
+    ['stand', /\b(tree ?stand|ladder|hang ?on|lock ?on|climber|stand|saddle set|box blind|elevated blind|seat|sit spot)\b/],
+    ['crossing', /\bfunnel|pinch/],
     ['scrape', /\bscrapes?\b/], ['rub', /\brubs?\b|rub ?line/], ['bed', /\bbed(s|ding)?\b/],
     ['camera', /\b(trail ?)?cam(era)?s?\b/], ['feeder', /\bfeeder|corn pile|bait/], ['plot', /food ?plot|\bplots?\b|clover|brassica|turnips?/],
     ['food', /\bfood|acorn|oaks?\b|persimmon|apple|ag field|crop|beans?|corn/], ['water', /\bwater|pond|creek|spring|tank|wallow|seep/],
@@ -46,10 +47,31 @@
     ['gate', /\bgate/], ['parking', /park(ing)?\b|truck|\blot\b|\batv\b|\bpull ?off/], ['blind', /\bblind/],
     ['sighting', /sighting|\bbuck\b|\bdoe\b|\bdeer\b|seen|shot|kill|harvest|blood|hit/]
   ];
+  // onX Hunt keeps the pin's kind in its icon (<onx:icon>), so that wins over the name. "Location" and
+  // "Point of Interest" say nothing, so those fall back to the words in the name and note.
+  var ICONS = {
+    'rub': 'rub', 'scrape': 'scrape', 'tree stand': 'stand', 'stand': 'stand', 'ground blind': 'blind', 'blind': 'blind',
+    'bedding area': 'bed', 'bedding': 'bed', 'bed': 'bed', 'water source': 'water', 'water': 'water', 'wallow': 'water',
+    'pinch point': 'crossing', 'funnel': 'crossing', 'crossing': 'crossing', 'tracks': 'trail', 'trail': 'trail', 'game trail': 'trail',
+    'trail camera': 'camera', 'camera': 'camera', 'feeder': 'feeder', 'food source': 'food', 'food': 'food', 'crops': 'food',
+    'food plot': 'plot', 'doe': 'sighting', 'buck': 'sighting', 'deer': 'sighting', 'sighting': 'sighting', 'shot': 'sighting',
+    'blood': 'sighting', 'blood trail': 'sighting', 'kill site': 'sighting', 'scat': 'sighting', 'shed': 'shed', 'antler': 'shed',
+    'gate': 'gate', 'parking': 'parking', 'truck': 'parking', '4x4': 'parking', 'atv': 'parking'
+  };
+  // onX (and Garmin) names a quick pin by its date, e.g. "Waypoint 10/22/25 05:35" or "My Location 10/30/25 09:31".
+  // That date is when the pin was really dropped; the name itself says nothing, so it is left blank.
+  function dateName(name) {
+    var m = /^(waypoint|my location|location|pin|marker|point)\s+(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})(?:\s+(\d{1,2}):(\d{2}))?\s*$/i.exec(name || '');
+    if (!m) return null;
+    var y = m[4].length === 2 ? 2000 + +m[4] : +m[4], p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return y + '-' + p(+m[2]) + '-' + p(+m[3]) + 'T' + p(+(m[5] || 12)) + ':' + p(+(m[6] || 0)) + ':00';
+  }
   var TYPES = ['scrape', 'rub', 'bed', 'trail', 'sighting', 'shed', 'food', 'plot', 'water', 'crossing', 'camera', 'feeder', 'blind', 'gate', 'parking', 'other'];
-  function guessType(name, sym, note, type) {
+  function guessType(name, sym, note, type, icon) {
     var t = String(type || '').toLowerCase();
     if (t.indexOf('standcast:') === 0) { t = t.slice(10); return t === 'stand' || TYPES.indexOf(t) >= 0 ? t : 'other'; }
+    var ic = ICONS[String(icon || '').trim().toLowerCase()];
+    if (ic) return ic;
     var hay = (name + ' ' + sym + ' ' + t).toLowerCase();
     for (var pass = 0; pass < 2; pass++) {
       for (var i = 0; i < WORDS.length; i++) if (WORDS[i][1].test(hay)) return WORDS[i][0];
@@ -64,9 +86,20 @@
       var lat = parseFloat(attr(b.open, 'lat')), lng = parseFloat(attr(b.open, 'lon'));
       if (!okLatLng(lat, lng)) return;
       var name = decode(tag(b.body, 'name')), note = decode(tag(b.body, 'desc') || tag(b.body, 'cmt')), sym = decode(tag(b.body, 'sym')), type = decode(tag(b.body, 'type'));
-      pts.push({ name: name, note: note, lat: lat, lng: lng, kind: guessType(name, sym, note, type), time: decode(tag(b.body, 'time')) || null });
+      pts.push({ name: name, note: note, lat: lat, lng: lng, kind: guessType(name, sym, note, type, decode(tag(b.body, 'icon'))), time: decode(tag(b.body, 'time')) || null });
     });
-    return { points: pts, lines: blocks(xml, 'trk').length + blocks(xml, 'rte').length };
+    return { points: tidy(pts), lines: blocks(xml, 'trk').length + blocks(xml, 'rte').length };
+  }
+  // onX stamps every pin with the moment of the export, which is no use: drop a time all the pins share,
+  // and take the real date from names like "Waypoint 10/22/25 05:35".
+  function tidy(pts) {
+    var shared = pts.length > 1 && pts.every(function (p) { return p.time && p.time === pts[0].time; });
+    pts.forEach(function (p) {
+      if (shared) p.time = null;
+      var d = dateName(p.name);
+      if (d) { p.time = d; p.name = ''; }
+    });
+    return pts;
   }
   function fromKml(xml) {
     var pts = [], lines = 0;
@@ -79,7 +112,7 @@
       var name = decode(tag(b.body, 'name')), note = decode(tag(b.body, 'description')), sym = decode(tag(b.body, 'styleUrl'));
       pts.push({ name: name, note: note, lat: lat, lng: lng, kind: guessType(name, sym, note, ''), time: decode(tag(b.body, 'when')) || null });
     });
-    return { points: pts, lines: lines };
+    return { points: tidy(pts), lines: lines };
   }
   // text of a .gpx or .kml file -> { format, points: [{ name, note, lat, lng, kind, time }], lines }
   function parse(text) {
