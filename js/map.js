@@ -253,7 +253,7 @@
       var s = it.stand, st = it.state;
       if (st) {
         var col = colors[it.cls] || colors.ok;
-        if (L_.cone) {
+        if (L_.cone && !s.noCone) {
           var ring = E.coneRing(s.lat, s.lng, E.norm(st.eff.from + 180), st.eff.speed);
           L.polygon(ring, { color: col, weight: 1.5, opacity: 0.9, fillColor: col, fillOpacity: 0.25, interactive: false }).addTo(g.cone);
         }

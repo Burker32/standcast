@@ -271,7 +271,7 @@
     if (!settings().layers.cone || ui.tMin == null) return [];
     const out = [];
     stands().forEach((s) => {
-      const fc = data.fc[s.id]; if (!fc) return;
+      const fc = data.fc[s.id]; if (!fc || s.noCone) return;
       const st = E.stateAt(s, fc, ui.tMin), v = E.toVec(st.eff.from, 0.35 * st.eff.speed + 0.6);
       out.push({ lat: s.lat, lng: s.lng, reachM: E.clamp(55 + st.eff.speed * 30, 55, 420), fb: { u: v.u, v: v.v }, swirl: st.swirl });
     });
@@ -313,7 +313,11 @@
       .filter((x) => !stands().some((st) => distM(st.lat, st.lng, x.lat, x.lng) < f.spacing * 0.9)) : [];
     if (anim) {
       // stands with swirl spin too
-      scentList.forEach((st) => { if (L_.swirl && st.swirl && st.swirl.score >= 0.45) swirls.push({ lat: st.lat, lng: st.lng, score: st.swirl.score, rM: 28 + 14 * st.swirl.score }); });
+      if (L_.swirl) stands().forEach((s) => {   // from the stands, not the scent list: a stand with its cone off can still swirl
+        const sfc = data.fc[s.id]; if (!sfc) return;
+        const sw = E.stateAt(s, sfc, ui.tMin).swirl;
+        if (sw && sw.score >= 0.45) swirls.push({ lat: s.lat, lng: s.lng, score: sw.score, rM: 28 + 14 * sw.score });
+      });
       M.renderField([]);
       SC.flow.set({ cells: cells, dLat: f.dLat, dLng: f.dLng, swirls: swirls, stands: scentList });
       return;
@@ -953,6 +957,10 @@
       }),
       ev ? h('div', { class: 'big-score ' + ev.label.cls }, h('b', null, String(ev.score)), h('span', null, ev.label.text)) : null));
     if (ev && sit) root.appendChild(h('p', { class: 'sub' }, sit.label + '  ·  ' + E.fmtClock(sit.start) + ' to ' + E.fmtClock(sit.end) + (data.ranks[0] === s.id ? '  ·  your best bet' : '')));
+    root.appendChild(h('label', { class: 'check' },
+      h('input', { type: 'checkbox', checked: !s.noCone, onchange: (e) => { S.updateStand(s.id, { noCone: !e.target.checked }); renderAll(); } }),
+      h('span', { class: 'sw sw-cone' }, ''), 'Show scent cone for this stand'));
+    if (settings().layers.cone === false) root.appendChild(h('p', { class: 'fine tight' }, 'All scent cones are off right now. Turn them back on in the layers menu.'));
     if (s.example) root.appendChild(h('p', { class: 'note' }, 'This is an example stand. Drag its pin, rename it or delete it.'));
 
     if (fc) {
@@ -1729,6 +1737,7 @@
       h('p', { class: 'line' }, 'It only sees the shape of the ground and your own marks, so scout a spot before you hang a stand. Mark bedding and food first for the best picks.')));
     root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Bow range and trail cameras'),
       h('p', { class: 'line' }, 'Rings at 20, 30 and 40 yd show round every stand when you zoom in. Turn them off in the layers menu.'),
+      h('p', { class: 'line' }, 'Scent cones in the layers menu turns them off and on for every stand. To hide just one, open that stand and untick Show scent cone. It stays hidden when you turn them all back on.'),
       h('p', { class: 'line' }, 'A Camera pin keeps every card pull. Open it and tap Add photos from the card to add many at once. They sort by the date the camera stamped on them, and the pin shows how many came at dawn, in the day, at dusk and at night.')));
     root.appendChild(h('div', { class: 'block' }, h('h3', null, 'Reading the thermals'),
       h('p', { class: 'line' }, 'Wind and thermals are drawn apart. The long pale streaks are the wind near the ground, slowed by the trees. The orange and purple glow marks slopes where thermals are working, and the bright beads crawling across it show which way: orange climbing uphill, purple draining downhill. Beads go faint where the wind is strong enough to overpower them. Pink spinning rings are swirl, where the two fight. The green puffs leaving each stand are your scent riding all of it together.'),
@@ -1830,7 +1839,7 @@
     });
     pop.querySelectorAll('[data-layer]').forEach((c) => c.addEventListener('change', () => { settings().layers[c.dataset.layer] = c.checked; S.save(); if (c.dataset.layer === 'animate' && SC.flow) SC.flow.setEnabled(c.checked);
       if (c.dataset.layer === 'publand' && SC.publand) { SC.publand.setEnabled(c.checked); if (c.checked && M.zoom < 11) toast('Zoom in to see public land boundaries.'); }
-      if (c.dataset.layer === 'field' || c.dataset.layer === 'swirl' || c.dataset.layer === 'animate') loadField(); renderMap(); }));
+      if (c.dataset.layer === 'field' || c.dataset.layer === 'swirl' || c.dataset.layer === 'animate') loadField(); renderMap(); if (c.dataset.layer === 'cone') renderSheet(); }));
     ['file-photo', 'file-camera'].forEach((id) => $(id).addEventListener('change', (e) => { const f = e.target.files && e.target.files[0]; if (f && photoCb) photoCb(f); }));
     $('file-shots').addEventListener('change', (e) => { if (shotsFor) addShots(shotsFor, e.target.files); });
     $('file-pins').addEventListener('change', (e) => { const f = e.target.files && e.target.files[0]; if (f) readPins(f); });

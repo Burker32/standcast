@@ -11,7 +11,7 @@ A bowhunting app that answers "which stand tonight?" It models wind, thermals, s
   2. Bump `VERSION` in `sw.js`.
   3. Run `npm test`, and `node --check` on each edited JS file.
   4. Commit and push to `main`. GitHub Pages rebuilds the site by itself, usually within a minute or two.
-- **Every deploy must bump `VERSION` in `sw.js`** (currently `'v46'`). The service worker serves cache-first, so phones keep the old app until the version changes. After a deploy, the owner closes and reopens the app once.
+- **Every deploy must bump `VERSION` in `sw.js`** (currently `'v47'`). The service worker serves cache-first, so phones keep the old app until the version changes. After a deploy, the owner closes and reopens the app once.
 - The app is served from the `/standcast/` subfolder, so every path in `index.html`, `manifest.webmanifest` and `sw.js` must stay relative (no leading `/`).
 - The repo is public. `CLAUDE.local.md` and zip files are kept out by `.gitignore`. Check `git status` before committing so nothing private goes up.
 - The empty `.nojekyll` file tells GitHub Pages to serve the files as they are.
@@ -75,7 +75,7 @@ Scripts load in this order in `index.html`: engine, exif, marktypes, store, pins
   - Pins: `js/pins.js` (loads after store) reads GPX, KML and KMZ (KMZ is unzipped with `DecompressionStream`) and takes the kind from the onX icon (`<onx:icon>`, `ICONS`), else guesses it from words in the name or note (`WORDS`). onX stamps every pin with the export time, so a time shared by all pins is dropped, and names like "Waypoint 10/22/25 05:35" become a blank name with that date (`dateName`). `toGpx()` writes stands, marks and routes, with `<type>standcast:kind</type>` so a round trip keeps kinds. `importView()` lets the user fix kinds before adding, and pins already present (same name within 5 yd) are skipped.
   - Camera photos: `mark.shots = [{ id, at, added }]`, dated by `exif.readDate()` (DateTimeOriginal, else DateTime, else the file date). `cameraBlock()` shows the gallery and the dawn/day/dusk/night counts. The viewer takes any item list (`openViewer(i, list)`). Backups carry shots as `x.data`.
   - Sit log and wind checks: `snapPreds()` saves each stand's call for today's sits in `standcast.preds.v1` (it stops updating 30 minutes into the sit, and entries are kept 10 days). Logging a sit copies that call into the sit as `pred` (or works it out from the forecast if that still covers the day), with `kind` (AM/PM), `obs` and `outcome` (range, seen, busted, none). `saveSits()` updates `windFix`. The track record shows on the stand and on its ranking card.
-  - `drawField` renders arrows, cones and swirls.
+  - `drawField` renders arrows, cones and swirls. Scent cones and puffs show when `layers.cone` is on and the stand's own `noCone` is not set.
   - Compass, locate and follow button, measure mode (yards).
   - Overlay switches (`OV_DEFAULT`), and the base button that cycles Summer, Leaf-off and Topo.
 - **`css/app.css`:** all styles. Colors are CSS variables such as `--map-swirl`.
